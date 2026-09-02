@@ -1,6 +1,7 @@
 from enum import Enum
 from datetime import datetime
-from sqlmodel import Field, SQLModel
+from sqlalchemy import DateTime
+from sqlmodel import Column, Field, SQLModel
 
 
 class Process(Enum):

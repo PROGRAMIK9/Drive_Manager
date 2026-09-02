@@ -17,6 +17,7 @@ async def create_db_and_tables():
             await conn.run_sync(SQLModel.metadata.create_all) 
     except Exception as e:
         print("DB ADRESS ERROR", e)
+
 async def get_async_session():
     async_session = sessionmaker(
         bind=engine,
