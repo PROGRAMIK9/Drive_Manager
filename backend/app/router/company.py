@@ -15,18 +15,22 @@ async def update_company(company_id: int, company_details: CompanyUpdate,service
     return company
 
 @router.delete("/{company_id}")
-async def delete_company(company_id: int):
-    pass
+async def delete_company(company_id: int, service: CompanyServiceDep):
+    await service.delete(company_id)
+    return {"message": "Company deleted successfully"}
 
 @router.patch("/interested/{company_id}")
-async def toggle_interest(company_id: int):
-    pass
-
+async def toggle_interest(company_id: int, service: CompanyServiceDep):
+    await service.toggle_interest(company_id)
+    return {"message": "Company interest toggled successfully"}
 
 @router.get("/{company_id}")
-async def get_company(company_id:int):
-    pass
+async def get_company(company_id:int, service: CompanyServiceDep):
+    company = await service.get_one(company_id)
+    return company
 
 @router.get("/")
-async def get_all():
-    pass
+async def get_all(service: CompanyServiceDep):
+    companies = await service.get_all()
+    return companies
+    
