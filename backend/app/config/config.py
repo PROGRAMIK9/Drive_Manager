@@ -36,3 +36,37 @@ class TokenSettings(BaseSettings):
 
 settings = DatabaseSetting()
 token_settings = TokenSettings()
+
+
+class MailSettings(BaseSettings):
+    MAIL_USERNAME: str = ""
+    MAIL_PASSWORD: str = ""
+    MAIL_PORT: int = 587
+    MAIL_SERVER: str = ""
+    MAIL_STARTTLS: bool = True
+    MAIL_SSL_TLS: bool = False
+    MAIL_FROM: str = ""
+    MAIL_FROM_NAME: str = "Driveboard"
+    VERIFICATION_URL: str = "http://localhost:8000/user/verify"
+    VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 60
+
+    model_config = {
+        "env_file": ENV_FILE_PATH,
+        "case_sensitive": True,
+        "extra": "ignore",
+    }
+
+
+class CelerySettings(BaseSettings):
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+
+    model_config = {
+        "env_file": ENV_FILE_PATH,
+        "case_sensitive": True,
+        "extra": "ignore",
+    }
+
+
+mail_settings = MailSettings()
+celery_settings = CelerySettings()

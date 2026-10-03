@@ -34,6 +34,7 @@ class User(SQLModel, table = True):
     email: str
     hashed_password: str
     role: Role = Field(sa_column=Column("role", sa.Enum(Role)))
+    is_verified: bool = Field(default=False, nullable=False)
     interetsed_companies: list["Interested"] = Relationship(
         back_populates="user"
     )

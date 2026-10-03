@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.database import get_async_session
 from app.helper.utils import decode_jwt, encode_jwt
 from app.schema.database import Company, Interested, Role, User
-from app.schema.models import Token, UserCreate
-from app.config.config import token_settings
+from app.schema.models import RegistrationResponse, Token, UserCreate
+from app.config.config import mail_settings, token_settings
+from app.service.mail_services import queue_verification_email
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/user/token")
 password_hash = PasswordHash.recommended()
@@ -20,7 +21,7 @@ class UserService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def register(self, user_details: UserCreate) -> User:
+    async def register(self, user_details: UserCreate) -> RegistrationResponse:
         existing_user = await self.session.scalar(
             select(User).where(User.email == user_details.email)
         )
@@ -48,7 +49,22 @@ class UserService:
             for company in companies
         )
         await self.session.commit()
-        return user
+        verification_token = encode_jwt({
+            "sub": str(user.id),
+            "purpose": "email_verification",
+            "exp": datetime.now(timezone.utc) + timedelta(
+                minutes=mail_settings.VERIFICATION_TOKEN_EXPIRE_MINUTES
+            ),
+        })
+        queue_verification_email(
+            recipient=user.email,
+            recipient_name=user.name,
+            verification_url=f"{mail_settings.VERIFICATION_URL}?token={verification_token}",
+        )
+        return RegistrationResponse(
+            message="Registration successful. Check your email to verify your account.",
+            email=user.email,
+        )
 
     async def login(self, form_data: OAuth2PasswordRequestForm) -> Token:
         user = await self.session.scalar(
@@ -60,6 +76,8 @@ class UserService:
                 detail="Incorrect email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        if not user.is_verified:
+            raise HTTPException(status_code=403, detail="Please verify your email before logging in")
 
         expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=token_settings.ACCESS_TOKEN_EXPIRE_MINUTES
@@ -73,6 +91,21 @@ class UserService:
             }
         )
         return Token(access_token=access_token)
+
+    async def verify_email(self, token: str) -> dict:
+        try:
+            payload = decode_jwt(token)
+            if payload.get("purpose") != "email_verification":
+                raise ValueError("Invalid verification token")
+            user_id = int(payload["sub"])
+        except Exception as error:
+            raise HTTPException(status_code=400, detail="Invalid or expired verification link") from error
+        user = await self.session.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        user.is_verified = True
+        await self.session.commit()
+        return {"message": "Email verified successfully. You can now log in."}
 
     async def get_current_user(self, token: str) -> User:
         credentials_error = HTTPException(

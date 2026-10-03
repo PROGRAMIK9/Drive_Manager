@@ -14,6 +14,10 @@ class UserCreate(UserBase):
 class UserRead(UserBase):
     id: int
 
+class RegistrationResponse(SQLModel):
+    message: str
+    email: EmailStr
+
 class Token(SQLModel):
     access_token: str
     token_type: str = "bearer"

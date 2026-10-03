@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.database.database import SessionDep, get_async_session
 from app.schema.models import CompanyCreate, CompanyRead, CompanyUpdate
 from app.schema.database import Company, Interested, User
+from app.service.mail_services import queue_event_reminder, queue_interest_notification
 from app.service.user_services import CurrentUserDep
 
 class CompanyService:
@@ -33,12 +34,13 @@ class CompanyService:
         self.session.add_all(
             Interested(
                 company_id=company.id,
-                user_id=user.id,
+                user_id=existing_user.id,
                 interested=False,
             )
-            for user in users
+            for existing_user in users
         )
         await self.session.commit()
+        queue_event_reminder(company.id, company.date)
         return company
 
     async def update(self, company_id: int, company_details: CompanyUpdate)-> CompanyRead:
@@ -51,6 +53,7 @@ class CompanyService:
         self.session.add(company)
         await self.session.commit()
         await self.session.refresh(company)
+        queue_event_reminder(company.id, company.date)
         return company
 
     async def toggle_interest(self, company_id: int):
@@ -73,12 +76,55 @@ class CompanyService:
             self.session.add(interest)
             await self.session.commit()
             await self.session.refresh(interest)
+            queue_interest_notification(
+                recipient=self.user.email,
+                recipient_name=self.user.name,
+                company_name=company.name,
+                company_location=company.location,
+                company_date=company.date,
+            )
             return interest
 
         interest.interested = not interest.interested
         await self.session.commit()
         await self.session.refresh(interest)
+        if interest.interested:
+            queue_interest_notification(
+                recipient=self.user.email,
+                recipient_name=self.user.name,
+                company_name=company.name,
+                company_location=company.location,
+                company_date=company.date,
+            )
         return interest
+
+    async def get_saved(self):
+        return (
+            await self.session.scalars(
+                select(Company)
+                .join(Interested, Interested.company_id == Company.id)
+                .where(
+                    Interested.user_id == self.user.id,
+                    Interested.interested.is_(True),
+                )
+            )
+        ).all()
+
+    async def get_interested_users(self, company_id: int):
+        self._require_spc_role()
+        company = await self.session.get(Company, company_id)
+        if not company:
+            raise HTTPException(status_code=404, detail="Company does not exist yet")
+        return (
+            await self.session.scalars(
+                select(User)
+                .join(Interested, Interested.user_id == User.id)
+                .where(
+                    Interested.company_id == company_id,
+                    Interested.interested.is_(True),
+                )
+            )
+        ).all()
 
     async def delete(self, company_id: int):
         company = await self.session.get(Company, company_id)
@@ -88,10 +134,22 @@ class CompanyService:
         await self.session.commit()
 
     async def get_all(self):
-        companies = (await self.session.scalars(select(Company))).all()
-        if not companies:
+        rows = (
+            await self.session.execute(
+                select(Company, Interested.interested)
+                .outerjoin(
+                    Interested,
+                    (Interested.company_id == Company.id)
+                    & (Interested.user_id == self.user.id),
+                )
+            )
+        ).all()
+        if not rows:
             raise HTTPException(status_code= 422, detail = "Company details were not added")
-        return companies
+        return [
+            CompanyRead(**company.model_dump(), interested=bool(interested))
+            for company, interested in rows
+        ]
 
     async def get_one(self, company_id: int):
         company = await self.session.get(Company, company_id)
