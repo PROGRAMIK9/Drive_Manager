@@ -6,12 +6,22 @@ from sqlalchemy import select
 from app.database.database import SessionDep, get_async_session
 from app.schema.models import CompanyCreate, CompanyRead, CompanyUpdate
 from app.schema.database import Company, Interested, User
+from app.service.user_services import CurrentUserDep
 
 class CompanyService:
-    def __init__(self, session: SessionDep):
+    def __init__(self, session: SessionDep, user: CurrentUserDep):
         self.session = session
+        self.user = user
+
+    def _require_spc_role(self) -> None:
+        if self.user.role.value != "SPC":
+            raise HTTPException(
+                status_code=403,
+                detail="Only users with the SPC role can add or update companies",
+            )
 
     async def add(self, company_create: CompanyCreate)->CompanyRead:
+        self._require_spc_role()
         company = Company(
             **company_create.model_dump()
         )
@@ -32,6 +42,7 @@ class CompanyService:
         return company
 
     async def update(self, company_id: int, company_details: CompanyUpdate)-> CompanyRead:
+        self._require_spc_role()
         company = await self.session.get(Company, company_id)
         if not company: 
             raise HTTPException(status_code= 422, detail = "Company not found. Please add the company details first")
@@ -42,10 +53,7 @@ class CompanyService:
         await self.session.refresh(company)
         return company
 
-    async def toggle_interest(self, company_id: int, user_id: int | None = None):
-        if user_id is None:
-            raise HTTPException(status_code=400, detail="user_id is required")
-
+    async def toggle_interest(self, company_id: int):
         company = await self.session.get(Company, company_id)
         if not company:
             raise HTTPException(status_code=404, detail="Company does not exist yet")
@@ -53,11 +61,19 @@ class CompanyService:
         interest = await self.session.scalar(
             select(Interested).where(
                 Interested.company_id == company_id,
-                Interested.user_id == user_id,
+                Interested.user_id == self.user.id,
             )
         )
         if not interest:
-            raise HTTPException(status_code=404, detail="Interest not found")
+            interest = Interested(
+                company_id=company_id,
+                user_id=self.user.id,
+                interested=True,
+            )
+            self.session.add(interest)
+            await self.session.commit()
+            await self.session.refresh(interest)
+            return interest
 
         interest.interested = not interest.interested
         await self.session.commit()
@@ -84,9 +100,10 @@ class CompanyService:
         return company
 
 async def get_company_service(
-        session: AsyncSession = Depends(get_async_session)
+    user: CurrentUserDep,
+    session: AsyncSession = Depends(get_async_session),
 )->AsyncGenerator[CompanyService, None]:
-    service = CompanyService(session)
+    service = CompanyService(session, user)
     yield service
 
 

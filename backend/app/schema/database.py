@@ -1,6 +1,8 @@
 from enum import Enum
 from datetime import datetime
+from pyclbr import Class
 from sqlalchemy import DateTime
+import sqlalchemy as sa
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 
@@ -8,6 +10,10 @@ class Process(Enum):
     online_assesment = "online_assesment"
     interview = "interview"
     ppt = "ppt"
+
+class Role(Enum):
+    spc = "SPC"
+    student = "STUDENT"    
 
     
 class Company(SQLModel, table = True):
@@ -20,14 +26,14 @@ class Company(SQLModel, table = True):
     interested_users: list["Interested"] = Relationship(
         back_populates="company"
     )
-    
+
 
 class User(SQLModel, table = True):
     id: int = Field(default = None, primary_key = True)
     name: str
     email: str
     hashed_password: str
-    role: str
+    role: Role = Field(sa_column=Column("role", sa.Enum(Role)))
     interetsed_companies: list["Interested"] = Relationship(
         back_populates="user"
     )

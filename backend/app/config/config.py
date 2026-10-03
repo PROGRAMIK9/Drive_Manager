@@ -14,7 +14,7 @@ class DatabaseSetting(BaseSettings):
     model_config = {
         "env_file": ENV_FILE_PATH,
         "case_sensitive": True,
-        "ignore_extra": True
+        "extra": "ignore"
     }
     
     @property
@@ -23,4 +23,16 @@ class DatabaseSetting(BaseSettings):
         return f"postgresql+asyncpg://{self.POSTGRES_USERNAME}:{encoded_password}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
 
+class TokenSettings(BaseSettings):
+    SECRET_KEY: str
+    ALGORITHM: str
+    ACCESS_TOKEN_EXPIRE_MINUTES: int
+
+    model_config = {
+        "env_file": ENV_FILE_PATH,
+        "case_sensitive": True,
+        "extra": "ignore"
+    }
+
 settings = DatabaseSetting()
+token_settings = TokenSettings()

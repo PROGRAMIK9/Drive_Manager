@@ -14,6 +14,10 @@ class UserCreate(UserBase):
 class UserRead(UserBase):
     id: int
 
+class Token(SQLModel):
+    access_token: str
+    token_type: str = "bearer"
+
 class CompanyBase(SQLModel):
     name:str
     process:str
