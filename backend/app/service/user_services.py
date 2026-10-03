@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.database import get_async_session
 from app.helper.utils import decode_jwt, encode_jwt
-from app.schema.database import Company, Interested, Role, User
+from app.schema.database import Company, Interested, PendingRegistration, Role, User
 from app.schema.models import RegistrationResponse, Token, UserCreate
 from app.config.config import mail_settings, token_settings
 from app.service.mail_services import queue_verification_email
@@ -27,43 +27,41 @@ class UserService:
         )
         if existing_user:
             raise HTTPException(status_code=409, detail="Email is already registered")
+        pending_user = await self.session.scalar(
+            select(PendingRegistration).where(PendingRegistration.email == user_details.email)
+        )
+        if pending_user:
+            await self.session.delete(pending_user)
 
         try:
             role = Role(user_details.role.upper())
         except (AttributeError, ValueError) as error:
             raise HTTPException(status_code=422, detail="Role must be SPC or STUDENT") from error
 
-        user = User(
+        pending_user = PendingRegistration(
             name=user_details.name,
             email=user_details.email,
             role=role,
             hashed_password=password_hash.hash(user_details.password),
         )
-        self.session.add(user)
+        self.session.add(pending_user)
         await self.session.commit()
-        await self.session.refresh(user)
-
-        companies = (await self.session.scalars(select(Company))).all()
-        self.session.add_all(
-            Interested(company_id=company.id, user_id=user.id, interested=False)
-            for company in companies
-        )
-        await self.session.commit()
+        await self.session.refresh(pending_user)
         verification_token = encode_jwt({
-            "sub": str(user.id),
+            "sub": str(pending_user.id),
             "purpose": "email_verification",
             "exp": datetime.now(timezone.utc) + timedelta(
                 minutes=mail_settings.VERIFICATION_TOKEN_EXPIRE_MINUTES
             ),
         })
         queue_verification_email(
-            recipient=user.email,
-            recipient_name=user.name,
+            recipient=pending_user.email,
+            recipient_name=pending_user.name,
             verification_url=f"{mail_settings.VERIFICATION_URL}?token={verification_token}",
         )
         return RegistrationResponse(
             message="Registration successful. Check your email to verify your account.",
-            email=user.email,
+            email=pending_user.email,
         )
 
     async def login(self, form_data: OAuth2PasswordRequestForm) -> Token:
@@ -100,10 +98,25 @@ class UserService:
             user_id = int(payload["sub"])
         except Exception as error:
             raise HTTPException(status_code=400, detail="Invalid or expired verification link") from error
-        user = await self.session.get(User, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        user.is_verified = True
+        pending_user = await self.session.get(PendingRegistration, user_id)
+        if not pending_user:
+            raise HTTPException(status_code=404, detail="Verification request not found or already used")
+        user = User(
+            name=pending_user.name,
+            email=pending_user.email,
+            hashed_password=pending_user.hashed_password,
+            role=pending_user.role,
+            is_verified=True,
+        )
+        self.session.add(user)
+        await self.session.commit()
+        await self.session.refresh(user)
+        companies = (await self.session.scalars(select(Company))).all()
+        self.session.add_all(
+            Interested(company_id=company.id, user_id=user.id, interested=False)
+            for company in companies
+        )
+        await self.session.delete(pending_user)
         await self.session.commit()
         return {"message": "Email verified successfully. You can now log in."}
 

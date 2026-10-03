@@ -10,6 +10,7 @@ class Process(Enum):
     online_assesment = "online_assesment"
     interview = "interview"
     ppt = "ppt"
+    send_mail = "send_mail"
 
 class Role(Enum):
     spc = "SPC"
@@ -38,6 +39,14 @@ class User(SQLModel, table = True):
     interetsed_companies: list["Interested"] = Relationship(
         back_populates="user"
     )
+
+
+class PendingRegistration(SQLModel, table=True):
+    id: int = Field(default=None, primary_key=True)
+    name: str
+    email: str = Field(index=True, unique=True)
+    hashed_password: str
+    role: Role = Field(sa_column=Column("role", sa.Enum(Role)))
 
 class Interested(SQLModel, table = True):
     user_id: int = Field(foreign_key = "user.id", primary_key = True) 

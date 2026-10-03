@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.database.database import SessionDep, get_async_session
 from app.schema.models import CompanyCreate, CompanyRead, CompanyUpdate
-from app.schema.database import Company, Interested, User
+from app.schema.database import Company, Interested, Process, Role, User
 from app.service.mail_services import queue_event_reminder, queue_interest_notification
 from app.service.user_services import CurrentUserDep
 
@@ -60,6 +60,8 @@ class CompanyService:
         company = await self.session.get(Company, company_id)
         if not company:
             raise HTTPException(status_code=404, detail="Company does not exist yet")
+        if company.process == Process.send_mail and self.user.role != Role.spc:
+            raise HTTPException(status_code=404, detail="Company does not exist yet")
 
         interest = await self.session.scalar(
             select(Interested).where(
@@ -98,18 +100,6 @@ class CompanyService:
             )
         return interest
 
-    async def get_saved(self):
-        return (
-            await self.session.scalars(
-                select(Company)
-                .join(Interested, Interested.company_id == Company.id)
-                .where(
-                    Interested.user_id == self.user.id,
-                    Interested.interested.is_(True),
-                )
-            )
-        ).all()
-
     async def get_interested_users(self, company_id: int):
         self._require_spc_role()
         company = await self.session.get(Company, company_id)
@@ -134,16 +124,14 @@ class CompanyService:
         await self.session.commit()
 
     async def get_all(self):
-        rows = (
-            await self.session.execute(
-                select(Company, Interested.interested)
-                .outerjoin(
-                    Interested,
-                    (Interested.company_id == Company.id)
-                    & (Interested.user_id == self.user.id),
-                )
-            )
-        ).all()
+        query = select(Company, Interested.interested).outerjoin(
+            Interested,
+            (Interested.company_id == Company.id)
+            & (Interested.user_id == self.user.id),
+        )
+        if self.user.role != Role.spc:
+            query = query.where(Company.process != Process.send_mail)
+        rows = (await self.session.execute(query)).all()
         if not rows:
             raise HTTPException(status_code= 422, detail = "Company details were not added")
         return [
@@ -153,7 +141,7 @@ class CompanyService:
 
     async def get_one(self, company_id: int):
         company = await self.session.get(Company, company_id)
-        if not company:
+        if not company or (company.process == Process.send_mail and self.user.role != Role.spc):
             raise HTTPException(status_code= 422, detail = "Company details were not added")
         return company
 

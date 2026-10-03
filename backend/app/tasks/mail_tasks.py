@@ -1,19 +1,26 @@
 import asyncio
+import logging
 from datetime import datetime
 
 from celery import Celery
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config.config import celery_settings
 from app.database.database import engine
-from app.schema.database import Company, Interested, User
-from app.service.mail_services import send_template_email
+from app.schema.database import Company, Interested, Role, User
+from app.service.email_sender import send_template_email
+
+logger = logging.getLogger(__name__)
 
 celery_app = Celery(
     "driveboard",
     broker=celery_settings.CELERY_BROKER_URL,
     backend=celery_settings.CELERY_RESULT_BACKEND,
+)
+celery_app.conf.update(
+    enable_utc=True,
+    timezone="UTC",
 )
 
 
@@ -50,6 +57,7 @@ def send_verification_email(recipient: str, recipient_name: str, verification_ur
 
 @celery_app.task(name="mail.send_event_reminder")
 def send_event_reminder(company_id: int) -> None:
+    logger.info("Running event reminder for company %s", company_id)
     asyncio.run(_send_event_reminder(company_id))
 
 
@@ -58,22 +66,32 @@ async def _send_event_reminder(company_id: int) -> None:
     async with session_factory() as session:
         company = await session.get(Company, company_id)
         if not company:
+            logger.warning("Skipping event reminder: company %s was not found", company_id)
             return
 
         users = (
             await session.scalars(
                 select(User)
-                .join(Interested, Interested.user_id == User.id)
+                .outerjoin(Interested, Interested.user_id == User.id)
                 .where(
-                    Interested.company_id == company_id,
-                    Interested.interested.is_(True),
+                    or_(
+                        User.role == Role.spc,
+                        (Interested.company_id == company_id)
+                        & Interested.interested.is_(True),
+                    )
                 )
+                .distinct()
             )
         ).all()
+        logger.info(
+            "Sending event reminder for company %s to %s recipients",
+            company_id,
+            len(users),
+        )
         for user in users:
             await send_template_email(
                 recipient=user.email,
-                subject=f"Starting soon: {company.name}",
+                subject=f"Event starting: {company.name}",
                 template_name="event_reminder.html",
                 context={
                     "recipient_name": user.name,
@@ -82,3 +100,4 @@ async def _send_event_reminder(company_id: int) -> None:
                     "company_date": company.date,
                 },
             )
+        logger.info("Finished event reminder for company %s", company_id)

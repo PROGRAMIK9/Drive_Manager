@@ -222,3 +222,8 @@ __marimo__/
 blog.db
 
 /migrations
+!/migrations/
+/migrations/*
+!/migrations/versions/
+/migrations/versions/*
+!/migrations/versions/bc31d8e42a90_add_send_mail_process.py

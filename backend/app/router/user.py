@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, Query
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.schema.models import RegistrationResponse, Token, UserCreate
-from app.service.user_services import UserServiceDep
+from app.schema.models import RegistrationResponse, Token, UserCreate, UserRead
+from app.service.user_services import CurrentUserDep, UserServiceDep
 
 router = APIRouter(prefix="/user", tags = ["User"])
 
@@ -20,6 +20,15 @@ async def sign_in(
 @router.get("/verify")
 async def verify_email(token: str = Query(...), service: UserServiceDep = None):
     return await service.verify_email(token)
+
+@router.get("/me", response_model=UserRead)
+async def get_me(user: CurrentUserDep):
+    return UserRead(
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        role=user.role.value,
+    )
 
 @router.post("/token")
 async def get_token(

@@ -1,45 +1,11 @@
 import logging
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
+from app.service.email_sender import send_template_email
 
-from app.config.config import mail_settings
 logger = logging.getLogger(__name__)
-TEMPLATE_FOLDER = Path(__file__).parent.parent / "templates" / "email"
-
-
-def get_mail_config() -> ConnectionConfig:
-    return ConnectionConfig(
-        MAIL_USERNAME=mail_settings.MAIL_USERNAME,
-        MAIL_PASSWORD=mail_settings.MAIL_PASSWORD,
-        MAIL_PORT=mail_settings.MAIL_PORT,
-        MAIL_SERVER=mail_settings.MAIL_SERVER,
-        MAIL_STARTTLS=mail_settings.MAIL_STARTTLS,
-        MAIL_SSL_TLS=mail_settings.MAIL_SSL_TLS,
-        MAIL_FROM=mail_settings.MAIL_FROM,
-        MAIL_FROM_NAME=mail_settings.MAIL_FROM_NAME,
-        TEMPLATE_FOLDER=TEMPLATE_FOLDER,
-    )
-
-
-async def send_template_email(
-    *,
-    recipient: str,
-    subject: str,
-    template_name: str,
-    context: dict,
-) -> None:
-    message = MessageSchema(
-        recipients=[recipient],
-        subject=subject,
-        subtype=MessageType.html,
-        template_body=context,
-    )
-    await FastMail(get_mail_config()).send_message(
-        message,
-        template_name=template_name,
-    )
+EVENT_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
 
 def queue_verification_email(*, recipient: str, recipient_name: str, verification_url: str) -> None:
@@ -58,6 +24,7 @@ def queue_interest_notification(
     company_location: str,
     company_date: datetime,
 ) -> None:
+    from app.tasks.mail_tasks import send_interest_notification
     try:
         send_interest_notification.delay(
             recipient,
@@ -73,10 +40,26 @@ def queue_interest_notification(
 def queue_event_reminder(company_id: int, company_date: datetime) -> None:
     from app.tasks.mail_tasks import send_event_reminder
 
-    reminder_at = company_date - timedelta(hours=1)
-    if reminder_at <= datetime.now():
+    # datetime-local values have no timezone. Interpret them in the app's
+    # user-facing timezone, then convert to UTC for Celery's ETA.
+    if company_date.tzinfo is None:
+        company_date = company_date.replace(tzinfo=EVENT_TIMEZONE)
+    event_time = company_date.astimezone(timezone.utc)
+    reminder_time = event_time - timedelta(hours=1)
+    now = datetime.now(timezone.utc)
+    if event_time <= now:
+        logger.info("Skipping reminder for past event company_id=%s event_time=%s", company_id, event_time)
         return
     try:
-        send_event_reminder.apply_async(args=[company_id], eta=reminder_at)
+        # If the event is less than an hour away, send the reminder now.
+        eta = max(reminder_time, now)
+        result = send_event_reminder.apply_async(args=[company_id], eta=eta)
+        logger.info(
+            "Queued event reminder company_id=%s event_time=%s eta=%s task_id=%s",
+            company_id,
+            event_time.isoformat(),
+            eta.isoformat(),
+            result.id,
+        )
     except Exception:
         logger.exception("Unable to queue event reminder")
