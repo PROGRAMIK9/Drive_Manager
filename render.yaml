@@ -119,6 +119,7 @@ services:
     name: driveboard-queue
     plan: free
     region: singapore
+    ipAllowList: []
     maxmemoryPolicy: noeviction
 
 databases:
