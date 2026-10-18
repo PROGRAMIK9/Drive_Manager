@@ -116,6 +116,38 @@ class CompanyService:
             )
         ).all()
 
+    async def get_interest_summary(self):
+        self._require_spc_role()
+        rows = (await self.session.execute(
+            select(Company, User)
+            .outerjoin(
+                Interested,
+                (Interested.company_id == Company.id)
+                & Interested.interested.is_(True),
+            )
+            .outerjoin(User, User.id == Interested.user_id)
+            .order_by(Company.name, User.name)
+        )).all()
+        summary: dict[int, dict] = {}
+        for company, user in rows:
+            entry = summary.setdefault(company.id, {
+                "company_id": company.id,
+                "company_name": company.name,
+                "process": company.process.value,
+                "location": company.location,
+                "date": company.date,
+                "interested_users": [],
+            })
+            if user is None:
+                continue
+            entry["interested_users"].append({
+                "id": user.id,
+                "name": user.name,
+                "email": user.email,
+                "role": user.role.value,
+            })
+        return list(summary.values())
+
     async def delete(self, company_id: int):
         company = await self.session.get(Company, company_id)
         if not company:
@@ -133,7 +165,7 @@ class CompanyService:
             query = query.where(Company.process != Process.send_mail)
         rows = (await self.session.execute(query)).all()
         if not rows:
-            raise HTTPException(status_code= 422, detail = "Company details were not added")
+            return []
         return [
             CompanyRead(**company.model_dump(), interested=bool(interested))
             for company, interested in rows

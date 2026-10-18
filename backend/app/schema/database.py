@@ -1,7 +1,5 @@
 from enum import Enum
 from datetime import datetime
-from pyclbr import Class
-from sqlalchemy import DateTime
 import sqlalchemy as sa
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -33,7 +31,8 @@ class User(SQLModel, table = True):
     id: int = Field(default = None, primary_key = True)
     name: str
     email: str
-    hashed_password: str
+    hashed_password: str | None = None
+    google_sub: str | None = Field(default=None, unique=True, index=True)
     role: Role = Field(sa_column=Column("role", sa.Enum(Role)))
     is_verified: bool = Field(default=False, nullable=False)
     interetsed_companies: list["Interested"] = Relationship(

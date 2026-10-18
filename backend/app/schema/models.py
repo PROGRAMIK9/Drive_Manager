@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 from pydantic import EmailStr
-from sqlalchemy import Column, DateTime
 from sqlmodel import SQLModel, Field
 
 class UserBase(SQLModel):
@@ -13,6 +12,14 @@ class UserCreate(UserBase):
 
 class UserRead(UserBase):
     id: int
+
+
+class UserRoleUpdate(SQLModel):
+    role: str
+
+
+class GoogleCredential(SQLModel):
+    credential: str
 
 class RegistrationResponse(SQLModel):
     message: str

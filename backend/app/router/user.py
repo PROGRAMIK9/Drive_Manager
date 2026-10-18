@@ -1,25 +1,13 @@
-from fastapi import APIRouter, Depends, Query
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter
 
-from app.schema.models import RegistrationResponse, Token, UserCreate, UserRead
+from app.schema.models import GoogleCredential, Token, UserRead, UserRoleUpdate
 from app.service.user_services import CurrentUserDep, UserServiceDep
 
 router = APIRouter(prefix="/user", tags = ["User"])
 
-@router.post("/register")
-async def sign_up(user_details: UserCreate, service: UserServiceDep) -> RegistrationResponse:
-    return await service.register(user_details)
-
-@router.post("/login")
-async def sign_in(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    service: UserServiceDep = None,
-) -> Token:
-    return await service.login(form_data)
-
-@router.get("/verify")
-async def verify_email(token: str = Query(...), service: UserServiceDep = None):
-    return await service.verify_email(token)
+@router.post("/google", response_model=Token)
+async def google_sign_in(payload: GoogleCredential, service: UserServiceDep):
+    return await service.login_with_google(payload.credential)
 
 @router.get("/me", response_model=UserRead)
 async def get_me(user: CurrentUserDep):
@@ -30,9 +18,10 @@ async def get_me(user: CurrentUserDep):
         role=user.role.value,
     )
 
-@router.post("/token")
-async def get_token(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    service: UserServiceDep = None,
-) -> Token:
-    return await service.login(form_data)
+@router.get("/", response_model=list[UserRead])
+async def list_users(user: CurrentUserDep, service: UserServiceDep):
+    return await service.list_users(user)
+
+@router.patch("/{user_id}/role", response_model=UserRead)
+async def update_user_role(user_id: int, payload: UserRoleUpdate, user: CurrentUserDep, service: UserServiceDep):
+    return await service.update_user_role(user, user_id, payload.role)

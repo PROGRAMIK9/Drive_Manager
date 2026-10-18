@@ -28,13 +28,17 @@ async def toggle_interest(company_id: int, service: CompanyServiceDep):
 async def get_interested_users(company_id: int, service: CompanyServiceDep):
     return await service.get_interested_users(company_id)
 
-@router.get("/{company_id}")
-async def get_company(company_id:int, service: CompanyServiceDep):
-    company = await service.get_one(company_id)
-    return company
+@router.get("/interest-summary")
+async def get_interest_summary(service: CompanyServiceDep):
+    return await service.get_interest_summary()
 
 @router.get("/")
 async def get_all(service: CompanyServiceDep):
     companies = await service.get_all()
     return companies
+
+@router.get("/{company_id}")
+async def get_company(company_id:int, service: CompanyServiceDep):
+    company = await service.get_one(company_id)
+    return company
     
