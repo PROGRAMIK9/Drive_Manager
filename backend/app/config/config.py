@@ -90,6 +90,7 @@ app_settings = AppSettings()
 
 
 class MailSettings(BaseSettings):
+    BREVO_API_KEY: str = ""
     MAIL_USERNAME: str = ""
     MAIL_PASSWORD: str = ""
     MAIL_PORT: int = 587

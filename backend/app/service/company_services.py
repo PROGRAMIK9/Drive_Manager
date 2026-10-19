@@ -1,11 +1,11 @@
 from typing import Annotated, AsyncGenerator
 from fastapi import BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.database.database import SessionDep, get_async_session
 from app.schema.models import CompanyCreate, CompanyRead, CompanyUpdate
-from app.schema.database import Company, Interested, Process, Role, User
+from app.schema.database import Company, EventReminder, Interested, Process, Role, User
 from app.service.mail_services import queue_event_reminder, queue_interest_notification
 from app.service.user_services import CurrentUserDep
 
@@ -19,7 +19,7 @@ class CompanyService:
         if self.user.role.value != "SPC":
             raise HTTPException(
                 status_code=403,
-                detail="Only users with the SPC role can add or update companies",
+                detail="Only users with the SPC role can manage companies",
             )
 
     async def add(self, company_create: CompanyCreate)->CompanyRead:
@@ -152,9 +152,16 @@ class CompanyService:
         return list(summary.values())
 
     async def delete(self, company_id: int):
+        self._require_spc_role()
         company = await self.session.get(Company, company_id)
         if not company:
-            raise HTTPException(status_code= 404, detail = "Company does not exist yet")
+            raise HTTPException(status_code=404, detail="Company does not exist yet")
+        await self.session.execute(
+            delete(Interested).where(Interested.company_id == company_id)
+        )
+        await self.session.execute(
+            delete(EventReminder).where(EventReminder.company_id == company_id)
+        )
         await self.session.delete(company)
         await self.session.commit()
 

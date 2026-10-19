@@ -29,6 +29,8 @@ services:
         sync: false
       - key: MAIL_USERNAME
         sync: false
+      - key: BREVO_API_KEY
+        sync: false
       - key: MAIL_PASSWORD
         sync: false
       - key: MAIL_SERVER
