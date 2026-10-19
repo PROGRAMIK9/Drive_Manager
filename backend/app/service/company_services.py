@@ -1,5 +1,5 @@
 from typing import Annotated, AsyncGenerator
-from fastapi import Depends, HTTPException
+from fastapi import BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -10,9 +10,10 @@ from app.service.mail_services import queue_event_reminder, queue_interest_notif
 from app.service.user_services import CurrentUserDep
 
 class CompanyService:
-    def __init__(self, session: SessionDep, user: CurrentUserDep):
+    def __init__(self, session: SessionDep, user: CurrentUserDep, background_tasks: BackgroundTasks):
         self.session = session
         self.user = user
+        self.background_tasks = background_tasks
 
     def _require_spc_role(self) -> None:
         if self.user.role.value != "SPC":
@@ -40,7 +41,7 @@ class CompanyService:
             for existing_user in users
         )
         await self.session.commit()
-        queue_event_reminder(company.id, company.date)
+        await queue_event_reminder(self.session, company.id, company.date)
         return company
 
     async def update(self, company_id: int, company_details: CompanyUpdate)-> CompanyRead:
@@ -53,7 +54,7 @@ class CompanyService:
         self.session.add(company)
         await self.session.commit()
         await self.session.refresh(company)
-        queue_event_reminder(company.id, company.date)
+        await queue_event_reminder(self.session, company.id, company.date)
         return company
 
     async def toggle_interest(self, company_id: int):
@@ -79,6 +80,7 @@ class CompanyService:
             await self.session.commit()
             await self.session.refresh(interest)
             queue_interest_notification(
+                self.background_tasks,
                 recipient=self.user.email,
                 recipient_name=self.user.name,
                 company_name=company.name,
@@ -92,6 +94,7 @@ class CompanyService:
         await self.session.refresh(interest)
         if interest.interested:
             queue_interest_notification(
+                self.background_tasks,
                 recipient=self.user.email,
                 recipient_name=self.user.name,
                 company_name=company.name,
@@ -179,9 +182,10 @@ class CompanyService:
 
 async def get_company_service(
     user: CurrentUserDep,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_async_session),
 )->AsyncGenerator[CompanyService, None]:
-    service = CompanyService(session, user)
+    service = CompanyService(session, user, background_tasks)
     yield service
 
 

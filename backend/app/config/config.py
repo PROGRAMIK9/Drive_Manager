@@ -108,16 +108,4 @@ class MailSettings(BaseSettings):
     }
 
 
-class CelerySettings(BaseSettings):
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
-
-    model_config = {
-        "env_file": ENV_FILE_PATH,
-        "case_sensitive": True,
-        "extra": "ignore",
-    }
-
-
 mail_settings = MailSettings()
-celery_settings = CelerySettings()

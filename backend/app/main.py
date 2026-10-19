@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from .router.company import router as Company
 from .router.user import router as User
 from .config.config import app_settings
+from .service.mail_services import due_reminders_dependency
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -23,7 +24,7 @@ app.add_middleware(
 async def get_root():
     return {"Detail":"It works"}
 
-@app.get("/api/health")
+@app.get("/api/health", dependencies=[Depends(due_reminders_dependency)])
 async def health_check():
     return {"detail": "Health Check Successful"}
 

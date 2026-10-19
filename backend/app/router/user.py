@@ -1,9 +1,14 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.schema.models import GoogleCredential, Token, UserRead, UserRoleUpdate
 from app.service.user_services import CurrentUserDep, UserServiceDep
+from app.service.mail_services import due_reminders_dependency
 
-router = APIRouter(prefix="/user", tags = ["User"])
+router = APIRouter(
+    prefix="/user",
+    tags=["User"],
+    dependencies=[Depends(due_reminders_dependency)],
+)
 
 @router.post("/google", response_model=Token)
 async def google_sign_in(payload: GoogleCredential, service: UserServiceDep):

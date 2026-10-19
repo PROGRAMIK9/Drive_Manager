@@ -2,21 +2,29 @@ import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from app.service.email_sender import send_template_email
+from fastapi import BackgroundTasks
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database.database import get_async_session
+from app.schema.database import EventReminder
+from app.tasks.mail_tasks import send_due_event_reminder, send_interest_notification, send_verification_email
 
 logger = logging.getLogger(__name__)
-EVENT_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
 
-def queue_verification_email(*, recipient: str, recipient_name: str, verification_url: str) -> None:
+def queue_verification_email(
+    background_tasks: BackgroundTasks,
+    *, recipient: str, recipient_name: str, verification_url: str,
+) -> None:
     try:
-        from app.tasks.mail_tasks import send_verification_email
-        send_verification_email.delay(recipient, recipient_name, verification_url)
+        background_tasks.add_task(send_verification_email, recipient, recipient_name, verification_url)
     except Exception:
         logger.exception("Unable to queue verification email")
 
 
 def queue_interest_notification(
+    background_tasks: BackgroundTasks,
     *,
     recipient: str,
     recipient_name: str,
@@ -24,9 +32,9 @@ def queue_interest_notification(
     company_location: str,
     company_date: datetime,
 ) -> None:
-    from app.tasks.mail_tasks import send_interest_notification
     try:
-        send_interest_notification.delay(
+        background_tasks.add_task(
+            send_interest_notification,
             recipient,
             recipient_name,
             company_name,
@@ -37,29 +45,50 @@ def queue_interest_notification(
         logger.exception("Unable to queue interest notification")
 
 
-def queue_event_reminder(company_id: int, company_date: datetime) -> None:
-    from app.tasks.mail_tasks import send_event_reminder
-
-    # datetime-local values have no timezone. Interpret them in the app's
-    # user-facing timezone, then convert to UTC for Celery's ETA.
+async def queue_event_reminder(session: AsyncSession, company_id: int, company_date: datetime) -> None:
+    """Persist a reminder so it remains available after process restarts or sleep."""
     if company_date.tzinfo is None:
-        company_date = company_date.replace(tzinfo=EVENT_TIMEZONE)
-    event_time = company_date.astimezone(timezone.utc)
-    reminder_time = event_time - timedelta(hours=1)
+        company_date = company_date.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+    event_at = company_date.astimezone(timezone.utc)
     now = datetime.now(timezone.utc)
-    if event_time <= now:
-        logger.info("Skipping reminder for past event company_id=%s event_time=%s", company_id, event_time)
+    scheduled_at = event_at - timedelta(hours=1)
+    reminder = await session.scalar(select(EventReminder).where(EventReminder.company_id == company_id))
+    if reminder is None:
+        reminder = EventReminder(company_id=company_id, scheduled_at=scheduled_at)
+        session.add(reminder)
+    else:
+        reminder.scheduled_at = scheduled_at
+        reminder.sent_at = None
+        reminder.claimed_at = None
+    if event_at <= now:
+        reminder.sent_at = now
+    await session.commit()
+
+
+async def schedule_due_reminders(
+    background_tasks: BackgroundTasks,
+    session: AsyncSession,
+) -> None:
+    """Claim due reminders and run them after this request returns."""
+    now = datetime.now(timezone.utc)
+    stale_claim = now - timedelta(minutes=10)
+    reminders = (await session.scalars(
+        select(EventReminder).where(
+            EventReminder.sent_at.is_(None),
+            EventReminder.scheduled_at <= now,
+            or_(EventReminder.claimed_at.is_(None), EventReminder.claimed_at < stale_claim),
+        ).with_for_update(skip_locked=True)
+    )).all()
+    if not reminders:
         return
-    try:
-        # If the event is less than an hour away, send the reminder now.
-        eta = max(reminder_time, now)
-        result = send_event_reminder.apply_async(args=[company_id], eta=eta)
-        logger.info(
-            "Queued event reminder company_id=%s event_time=%s eta=%s task_id=%s",
-            company_id,
-            event_time.isoformat(),
-            eta.isoformat(),
-            result.id,
-        )
-    except Exception:
-        logger.exception("Unable to queue event reminder")
+    company_ids = [reminder.company_id for reminder in reminders]
+    for reminder in reminders:
+        reminder.claimed_at = now
+    await session.commit()
+    for company_id in company_ids:
+        background_tasks.add_task(send_due_event_reminder, company_id)
+
+
+async def due_reminders_dependency(background_tasks: BackgroundTasks) -> None:
+    async for session in get_async_session():
+        await schedule_due_reminders(background_tasks, session)

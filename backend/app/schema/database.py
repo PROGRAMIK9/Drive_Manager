@@ -25,6 +25,16 @@ class Company(SQLModel, table = True):
     interested_users: list["Interested"] = Relationship(
         back_populates="company"
     )
+    reminder: "EventReminder" = Relationship(back_populates="company")
+
+
+class EventReminder(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    company_id: int = Field(foreign_key="company.id", unique=True, index=True)
+    scheduled_at: datetime = Field(sa_type=sa.DateTime(timezone=True), index=True)
+    sent_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
+    claimed_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True), index=True)
+    company: Company = Relationship(back_populates="reminder")
 
 
 class User(SQLModel, table = True):

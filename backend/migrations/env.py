@@ -5,7 +5,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.config.config import settings
-from app.schema.database import Company, User, Interested
+from app.schema.database import Company, EventReminder, User, Interested
 from alembic import context
 from sqlmodel import SQLModel
 

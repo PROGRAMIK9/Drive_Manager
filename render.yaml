@@ -25,17 +25,15 @@ services:
         sync: false
       - key: SPC_EMAILS
         sync: false
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: driveboard-queue
-          type: keyvalue
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          name: driveboard-queue
-          type: keyvalue
-          property: connectionString
       - key: CORS_ORIGINS
+        sync: false
+      - key: MAIL_USERNAME
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: MAIL_SERVER
+        sync: false
+      - key: MAIL_FROM
         sync: false
 
   - type: web
@@ -52,75 +50,6 @@ services:
           envVarKey: RENDER_EXTERNAL_URL
       - key: VITE_GOOGLE_CLIENT_ID
         sync: false
-
-  - type: worker
-    name: driveboard-mail-worker
-    runtime: python
-    rootDir: backend
-    plan: starter
-    region: singapore
-    buildCommand: uv sync --frozen
-    startCommand: uv run --frozen celery -A app.tasks.mail_tasks:celery_app worker --loglevel=INFO
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: driveboard-db
-          property: connectionString
-      - key: CELERY_BROKER_URL
-        fromService:
-          name: driveboard-queue
-          type: keyvalue
-          property: connectionString
-      - key: CELERY_RESULT_BACKEND
-        fromService:
-          name: driveboard-queue
-          type: keyvalue
-          property: connectionString
-      - key: SECRET_KEY
-        fromService:
-          name: driveboard-api
-          type: web
-          envVarKey: SECRET_KEY
-      - key: ALGORITHM
-        fromService:
-          name: driveboard-api
-          type: web
-          envVarKey: ALGORITHM
-      - key: ACCESS_TOKEN_EXPIRE_MINUTES
-        fromService:
-          name: driveboard-api
-          type: web
-          envVarKey: ACCESS_TOKEN_EXPIRE_MINUTES
-      - key: GOOGLE_CLIENT_ID
-        fromService:
-          name: driveboard-api
-          type: web
-          envVarKey: GOOGLE_CLIENT_ID
-      - key: RVCE_EMAIL_DOMAIN
-        fromService:
-          name: driveboard-api
-          type: web
-          envVarKey: RVCE_EMAIL_DOMAIN
-      - key: SPC_EMAILS
-        fromService:
-          name: driveboard-api
-          type: web
-          envVarKey: SPC_EMAILS
-      - key: MAIL_USERNAME
-        sync: false
-      - key: MAIL_PASSWORD
-        sync: false
-      - key: MAIL_SERVER
-        sync: false
-      - key: MAIL_FROM
-        sync: false
-
-  - type: keyvalue
-    name: driveboard-queue
-    plan: free
-    region: singapore
-    ipAllowList: []
-    maxmemoryPolicy: noeviction
 
 databases:
   - name: driveboard-db

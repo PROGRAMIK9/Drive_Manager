@@ -1,7 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.service.company_services import CompanyServiceDep
+from app.service.mail_services import due_reminders_dependency
 from app.schema.models import CompanyCreate, CompanyUpdate, CompanyRead, UserRead
-router = APIRouter(prefix="/company", tags = ["Company"])
+router = APIRouter(
+    prefix="/company",
+    tags=["Company"],
+    dependencies=[Depends(due_reminders_dependency)],
+)
 
 @router.post("/", response_model = CompanyRead)
 async def add_company(service: CompanyServiceDep, company_details: CompanyCreate):
