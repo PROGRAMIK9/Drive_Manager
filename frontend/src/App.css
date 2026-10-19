@@ -26,3 +26,4 @@
 .sidebar-spacer{min-height:10px}.nav-item{margin-bottom:2px}.heart-button:disabled{opacity:.38;cursor:not-allowed}.toolbar{gap:12px}.year-picker{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;white-space:nowrap}.year-picker select{padding:9px 12px;border:1px solid var(--line);border-radius:9px;color:var(--ink);background:var(--paper)}
 @media(max-width:800px){.sidebar{gap:0}.sidebar-spacer{flex:0 1 18px;min-height:8px}.install-action{margin-top:auto}.signout-action{margin-top:12px}.sidebar-footnote{margin-top:8px}.side-label{margin-top:27px}.side-nav{gap:8px}}
 @media(max-height:620px){.sidebar{padding-top:16px;padding-bottom:10px}.side-label{margin-top:17px;margin-bottom:10px}.nav-item{padding-top:9px;padding-bottom:9px}.sidebar-spacer{min-height:6px}.sidebar-action{padding-top:8px;padding-bottom:8px}}
+@media(min-width:801px){.app-shell.sidebar-collapsed .profile-card{margin-bottom:14px}}

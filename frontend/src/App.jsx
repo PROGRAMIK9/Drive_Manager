@@ -196,11 +196,10 @@ function App() {
         <div className="profile-card"><div className="avatar">{user?.name?.slice(0, 1).toUpperCase()}</div><div><strong>{user?.name}</strong><span>{isSpc ? 'SPC coordinator' : 'Student'}</span></div></div>
         <div className="side-label">Workspace</div>
         <nav className="side-nav">
-          <button className={`nav-item ${activeView === 'opportunities' ? 'active' : ''}`} onClick={() => selectView('opportunities')} title="Opportunities"><BriefcaseBusiness size={18} /><span className="nav-label">Opportunities</span><span className="nav-count">{companies.length}</span></button>
+          {isSpc ? <button className={`nav-item ${activeView === 'companies' ? 'active' : ''}`} onClick={() => selectView('companies')} title="Manage companies"><Building2 size={18} /><span className="nav-label">Manage companies</span></button> : <button className={`nav-item ${activeView === 'opportunities' ? 'active' : ''}`} onClick={() => selectView('opportunities')} title="Opportunities"><BriefcaseBusiness size={18} /><span className="nav-label">Opportunities</span><span className="nav-count">{companies.length}</span></button>}
           {isSpc && <>
             <button className={`nav-item ${activeView === 'users' ? 'active' : ''}`} onClick={() => selectView('users')} title="Manage users"><Users size={18} /><span className="nav-label">Manage users</span></button>
             <button className={`nav-item ${activeView === 'interest' ? 'active' : ''}`} onClick={() => selectView('interest')} title="Drive interest"><Heart size={18} /><span className="nav-label">Drive interest</span></button>
-            <button className={`nav-item ${activeView === 'companies' ? 'active' : ''}`} onClick={() => selectView('companies')} title="Manage companies"><Building2 size={18} /><span className="nav-label">Manage companies</span></button>
           </>}
         </nav>
         <div className="sidebar-spacer" />
