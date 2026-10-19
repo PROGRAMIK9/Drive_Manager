@@ -1,4 +1,6 @@
 from typing import Annotated, AsyncGenerator
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from fastapi import BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
@@ -6,7 +8,7 @@ from sqlalchemy import delete, select
 from app.database.database import SessionDep, get_async_session
 from app.schema.models import CompanyCreate, CompanyRead, CompanyUpdate
 from app.schema.database import Company, EventReminder, Interested, Process, Role, User
-from app.service.mail_services import queue_event_reminder, queue_interest_notification
+from app.service.mail_services import queue_event_reminder
 from app.service.user_services import CurrentUserDep
 
 class CompanyService:
@@ -24,6 +26,8 @@ class CompanyService:
 
     async def add(self, company_create: CompanyCreate)->CompanyRead:
         self._require_spc_role()
+        if company_create.year_of_passing not in (2027, 2028):
+            raise HTTPException(status_code=422, detail="Year of passing must be 2027 or 2028")
         company = Company(
             **company_create.model_dump()
         )
@@ -46,6 +50,8 @@ class CompanyService:
 
     async def update(self, company_id: int, company_details: CompanyUpdate)-> CompanyRead:
         self._require_spc_role()
+        if company_details.year_of_passing is not None and company_details.year_of_passing not in (2027, 2028):
+            raise HTTPException(status_code=422, detail="Year of passing must be 2027 or 2028")
         company = await self.session.get(Company, company_id)
         if not company: 
             raise HTTPException(status_code= 422, detail = "Company not found. Please add the company details first")
@@ -63,6 +69,9 @@ class CompanyService:
             raise HTTPException(status_code=404, detail="Company does not exist yet")
         if company.process == Process.send_mail and self.user.role != Role.spc:
             raise HTTPException(status_code=404, detail="Company does not exist yet")
+        event_at = company.date.replace(tzinfo=ZoneInfo("Asia/Kolkata")) if company.date.tzinfo is None else company.date
+        if event_at <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=409, detail="Interest is closed because this event has already started")
 
         interest = await self.session.scalar(
             select(Interested).where(
@@ -79,28 +88,11 @@ class CompanyService:
             self.session.add(interest)
             await self.session.commit()
             await self.session.refresh(interest)
-            queue_interest_notification(
-                self.background_tasks,
-                recipient=self.user.email,
-                recipient_name=self.user.name,
-                company_name=company.name,
-                company_location=company.location,
-                company_date=company.date,
-            )
             return interest
 
         interest.interested = not interest.interested
         await self.session.commit()
         await self.session.refresh(interest)
-        if interest.interested:
-            queue_interest_notification(
-                self.background_tasks,
-                recipient=self.user.email,
-                recipient_name=self.user.name,
-                company_name=company.name,
-                company_location=company.location,
-                company_date=company.date,
-            )
         return interest
 
     async def get_interested_users(self, company_id: int):
@@ -173,6 +165,8 @@ class CompanyService:
         )
         if self.user.role != Role.spc:
             query = query.where(Company.process != Process.send_mail)
+        if self.user.role != Role.spc:
+            query = query.where(Company.year_of_passing == (self.user.year_of_passing or 2027))
         rows = (await self.session.execute(query)).all()
         if not rows:
             return []

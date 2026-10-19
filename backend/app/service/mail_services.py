@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.database import get_async_session
 from app.schema.database import EventReminder
-from app.tasks.mail_tasks import send_due_event_reminder, send_interest_notification, send_verification_email
+from app.tasks.mail_tasks import send_due_event_reminder, send_verification_email
 
 logger = logging.getLogger(__name__)
 
@@ -52,16 +52,24 @@ async def queue_event_reminder(session: AsyncSession, company_id: int, company_d
     event_at = company_date.astimezone(timezone.utc)
     now = datetime.now(timezone.utc)
     scheduled_at = event_at - timedelta(hours=1)
+    day_before_scheduled_at = event_at - timedelta(days=1)
     reminder = await session.scalar(select(EventReminder).where(EventReminder.company_id == company_id))
     if reminder is None:
-        reminder = EventReminder(company_id=company_id, scheduled_at=scheduled_at)
+        reminder = EventReminder(company_id=company_id, scheduled_at=scheduled_at, day_before_scheduled_at=day_before_scheduled_at)
         session.add(reminder)
     else:
         reminder.scheduled_at = scheduled_at
         reminder.sent_at = None
         reminder.claimed_at = None
+    reminder.day_before_sent_at = None
+    reminder.day_before_claimed_at = None
+    reminder.day_before_scheduled_at = day_before_scheduled_at
     if event_at <= now:
         reminder.sent_at = now
+        reminder.day_before_sent_at = now
+    elif event_at <= now + timedelta(hours=1):
+        # A drive added within its one-hour window should notify immediately.
+        reminder.scheduled_at = now
     await session.commit()
 
 
@@ -79,14 +87,27 @@ async def schedule_due_reminders(
             or_(EventReminder.claimed_at.is_(None), EventReminder.claimed_at < stale_claim),
         ).with_for_update(skip_locked=True)
     )).all()
-    if not reminders:
-        return
-    company_ids = [reminder.company_id for reminder in reminders]
     for reminder in reminders:
         reminder.claimed_at = now
-    await session.commit()
+    if reminders:
+        await session.commit()
+    company_ids = [reminder.company_id for reminder in reminders]
     for company_id in company_ids:
-        background_tasks.add_task(send_due_event_reminder, company_id)
+        background_tasks.add_task(send_due_event_reminder, company_id, "hour")
+
+    day_reminders = (await session.scalars(
+        select(EventReminder).where(
+            EventReminder.day_before_sent_at.is_(None),
+            EventReminder.day_before_scheduled_at <= now,
+            or_(EventReminder.day_before_claimed_at.is_(None), EventReminder.day_before_claimed_at < stale_claim),
+        ).with_for_update(skip_locked=True)
+    )).all()
+    for reminder in day_reminders:
+        reminder.day_before_claimed_at = now
+    if day_reminders:
+        await session.commit()
+    for reminder in day_reminders:
+        background_tasks.add_task(send_due_event_reminder, reminder.company_id, "day")
 
 
 async def due_reminders_dependency(background_tasks: BackgroundTasks) -> None:

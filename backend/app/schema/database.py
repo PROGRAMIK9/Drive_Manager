@@ -21,6 +21,7 @@ class Company(SQLModel, table = True):
     process: Process
     location: str
     date: datetime
+    year_of_passing: int = Field(default=2027)
     considered: bool
     interested_users: list["Interested"] = Relationship(
         back_populates="company"
@@ -32,8 +33,11 @@ class EventReminder(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     company_id: int = Field(foreign_key="company.id", unique=True, index=True)
     scheduled_at: datetime = Field(sa_type=sa.DateTime(timezone=True), index=True)
+    day_before_scheduled_at: datetime = Field(default=None, sa_type=sa.DateTime(timezone=True), index=True)
     sent_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
     claimed_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True), index=True)
+    day_before_sent_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
+    day_before_claimed_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True), index=True)
     company: Company = Relationship(back_populates="reminder")
 
 
@@ -45,6 +49,7 @@ class User(SQLModel, table = True):
     google_sub: str | None = Field(default=None, unique=True, index=True)
     role: Role = Field(sa_column=Column("role", sa.Enum(Role)))
     is_verified: bool = Field(default=False, nullable=False)
+    year_of_passing: int | None = Field(default=None)
     interetsed_companies: list["Interested"] = Relationship(
         back_populates="user"
     )

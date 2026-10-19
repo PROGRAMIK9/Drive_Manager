@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.database import get_async_session
 from app.helper.utils import decode_jwt, encode_jwt
 from app.schema.database import Company, Interested, Role, User
-from app.schema.models import Token
+from app.schema.models import Token, UserRead
 from app.config.config import google_auth_settings, token_settings
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/user/google", auto_error=False)
@@ -95,11 +95,12 @@ class UserService:
         )
         return Token(access_token=access_token)
 
-    async def list_users(self, current_user: User) -> list[User]:
+    async def list_users(self, current_user: User) -> list[UserRead]:
         self._require_spc(current_user)
-        return list((await self.session.scalars(select(User).order_by(User.name, User.email))).all())
+        users = (await self.session.scalars(select(User).order_by(User.name, User.email))).all()
+        return [UserRead(id=u.id, name=u.name, email=u.email, role=u.role.value, year_of_passing=u.year_of_passing) for u in users]
 
-    async def update_user_role(self, current_user: User, user_id: int, role_name: str) -> User:
+    async def update_user_role(self, current_user: User, user_id: int, role_name: str, year_of_passing: int | None = None) -> UserRead:
         self._require_spc(current_user)
         try:
             role = Role(role_name.strip().upper())
@@ -109,9 +110,10 @@ class UserService:
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         user.role = role
+        user.year_of_passing = year_of_passing
         await self.session.commit()
         await self.session.refresh(user)
-        return user
+        return UserRead(id=user.id, name=user.name, email=user.email, role=user.role.value, year_of_passing=user.year_of_passing)
 
     @staticmethod
     def _require_spc(current_user: User) -> None:

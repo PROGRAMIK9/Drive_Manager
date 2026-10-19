@@ -39,15 +39,20 @@ async def send_verification_email(recipient: str, recipient_name: str, verificat
     )
 
 
-async def send_due_event_reminder(company_id: int) -> None:
-    logger.info("Running event reminder for company %s", company_id)
+async def send_due_event_reminder(company_id: int, window: str = "hour") -> None:
+    logger.info("Running %s event reminder for company %s", window, company_id)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with session_factory() as session:
         reminder = await session.scalar(
             select(EventReminder).where(EventReminder.company_id == company_id)
         )
         company = await session.get(Company, company_id)
-        if not reminder or not company or reminder.sent_at is not None:
+        if not reminder or not company:
+            return
+        day_before = window == "day"
+        sent_field = "day_before_sent_at" if day_before else "sent_at"
+        claimed_field = "day_before_claimed_at" if day_before else "claimed_at"
+        if getattr(reminder, sent_field) is not None:
             return
 
         try:
@@ -69,7 +74,7 @@ async def send_due_event_reminder(company_id: int) -> None:
             for user in users:
                 await send_template_email(
                     recipient=user.email,
-                    subject=f"Event starting: {company.name}",
+                    subject=f"Event {'tomorrow' if day_before else 'starting soon'}: {company.name}",
                     template_name="event_reminder.html",
                     context={
                         "recipient_name": user.name,
@@ -78,11 +83,11 @@ async def send_due_event_reminder(company_id: int) -> None:
                         "company_date": company.date,
                     },
                 )
-            reminder.sent_at = datetime.now().astimezone()
-            reminder.claimed_at = None
+            setattr(reminder, sent_field, datetime.now().astimezone())
+            setattr(reminder, claimed_field, None)
             await session.commit()
             logger.info("Finished event reminder for company %s", company_id)
         except Exception:
             logger.exception("Event reminder failed for company %s; it will be retried", company_id)
-            reminder.claimed_at = None
+            setattr(reminder, claimed_field, None)
             await session.commit()
