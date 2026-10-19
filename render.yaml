@@ -6,7 +6,7 @@ services:
     plan: free
     region: singapore
     buildCommand: uv sync --frozen
-    startCommand: uv run --frozen python scripts/bootstrap_db.py && uv run --frozen uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: PYTHONPATH=. uv run --frozen python scripts/bootstrap_db.py && PYTHONPATH=. uv run --frozen uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
