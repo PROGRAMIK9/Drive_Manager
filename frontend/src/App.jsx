@@ -200,7 +200,7 @@ function App() {
           {isSpc && <>
             <button className={`nav-item ${activeView === 'users' ? 'active' : ''}`} onClick={() => selectView('users')} title="Manage users"><Users size={18} /><span className="nav-label">Manage users</span></button>
             <button className={`nav-item ${activeView === 'interest' ? 'active' : ''}`} onClick={() => selectView('interest')} title="Drive interest"><Heart size={18} /><span className="nav-label">Drive interest</span></button>
-            <button className={`nav-item ${activeView === 'opportunities' ? 'active' : ''}`} onClick={() => selectView('opportunities')} title="Manage companies"><Building2 size={18} /><span className="nav-label">Manage companies</span></button>
+            <button className={`nav-item ${activeView === 'companies' ? 'active' : ''}`} onClick={() => selectView('companies')} title="Manage companies"><Building2 size={18} /><span className="nav-label">Manage companies</span></button>
           </>}
         </nav>
         <div className="sidebar-spacer" />
