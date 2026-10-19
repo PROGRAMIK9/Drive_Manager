@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bell, BriefcaseBusiness, Building2, CalendarDays, CircleAlert, Heart, LogIn, MapPin, Pencil, Plus, Search, Sparkles, Star, Trash2, Users, X } from 'lucide-react'
+import { Bell, BriefcaseBusiness, Building2, CalendarDays, CircleAlert, Download, Heart, LogOut, MapPin, Menu, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Sparkles, Star, Trash2, Users, X } from 'lucide-react'
 import CompanyForm from './CompanyForm'
 import './App.css'
 
@@ -36,6 +36,36 @@ function App() {
   const [activeView, setActiveView] = useState('opportunities')
   const [users, setUsers] = useState([])
   const [interestSummary, setInterestSummary] = useState([])
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [installPrompt, setInstallPrompt] = useState(null)
+  const notificationRef = useRef(null)
+
+  useEffect(() => {
+    const captureInstallPrompt = (event) => {
+      event.preventDefault()
+      setInstallPrompt(event)
+    }
+    window.addEventListener('beforeinstallprompt', captureInstallPrompt)
+    return () => window.removeEventListener('beforeinstallprompt', captureInstallPrompt)
+  }, [])
+
+  useEffect(() => {
+    if (!notificationsOpen) return
+    const closeOnOutsideClick = (event) => {
+      if (!notificationRef.current?.contains(event.target)) setNotificationsOpen(false)
+    }
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setNotificationsOpen(false)
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [notificationsOpen])
 
   useEffect(() => {
     const savedToken = localStorage.getItem('drive-manager-token')
@@ -95,6 +125,26 @@ function App() {
 
   const isSpc = user?.role?.toLowerCase() === 'spc'
   const visibleCompanies = companies.filter((company) => (isSpc || company.process !== 'send_mail') && [company.name, company.location, company.process].join(' ').toLowerCase().includes(search.toLowerCase()) && (activeFilter === 'All opportunities' || company.process === activeFilter))
+  const savedOpportunities = companies
+    .filter((company) => company.interested)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+  const now = Date.now()
+  const upcomingCount = savedOpportunities.filter((company) => {
+    const timeUntil = new Date(company.date).getTime() - now
+    return timeUntil >= 0 && timeUntil <= 7 * 24 * 60 * 60 * 1000
+  }).length
+
+  function selectView(view) {
+    setActiveView(view)
+    setSidebarOpen(false)
+  }
+
+  async function installApp() {
+    if (!installPrompt) return
+    await installPrompt.prompt()
+    await installPrompt.userChoice
+    setInstallPrompt(null)
+  }
 
   async function toggleInterest(companyId) {
     try {
@@ -129,16 +179,27 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><span className="brand-mark"><Sparkles size={16} /></span><span>Drive<span className="brand-light">board</span></span></div>
+    <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${sidebarOpen ? 'sidebar-visible' : ''}`}>
+      {sidebarOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
+      <aside className="sidebar" aria-label="Main navigation">
+        <div className="sidebar-top"><div className="brand"><span className="brand-mark"><Sparkles size={16} /></span><span>Drive<span className="brand-light">board</span></span></div><button className="sidebar-collapse" aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button></div>
         <div className="profile-card"><div className="avatar">{user?.name?.slice(0, 1).toUpperCase()}</div><div><strong>{user?.name}</strong><span>{isSpc ? 'SPC coordinator' : 'Student'}</span></div></div>
         <div className="side-label">Workspace</div>
-        <nav className="side-nav"><button className={`nav-item ${activeView === 'opportunities' ? 'active' : ''}`} onClick={() => setActiveView('opportunities')}><BriefcaseBusiness size={18} /> Opportunities <span className="nav-count">{companies.length}</span></button>{isSpc && <><button className={`nav-item ${activeView === 'users' ? 'active' : ''}`} onClick={() => setActiveView('users')}><Users size={18} /> Manage users</button><button className={`nav-item ${activeView === 'interest' ? 'active' : ''}`} onClick={() => setActiveView('interest')}><Heart size={18} /> Drive interest</button><button className={`nav-item ${activeView === 'opportunities' ? 'active' : ''}`} onClick={() => setActiveView('opportunities')}><Building2 size={18} /> Manage companies</button></>}</nav>
-        <div className="sidebar-note"><div className="note-icon"><Bell size={17} /></div><strong>Keep your plans moving</strong><p>Event alerts will arrive by email.</p></div>
+        <nav className="side-nav">
+          <button className={`nav-item ${activeView === 'opportunities' ? 'active' : ''}`} onClick={() => selectView('opportunities')} title="Opportunities"><BriefcaseBusiness size={18} /><span className="nav-label">Opportunities</span><span className="nav-count">{companies.length}</span></button>
+          {isSpc && <>
+            <button className={`nav-item ${activeView === 'users' ? 'active' : ''}`} onClick={() => selectView('users')} title="Manage users"><Users size={18} /><span className="nav-label">Manage users</span></button>
+            <button className={`nav-item ${activeView === 'interest' ? 'active' : ''}`} onClick={() => selectView('interest')} title="Drive interest"><Heart size={18} /><span className="nav-label">Drive interest</span></button>
+            <button className={`nav-item ${activeView === 'opportunities' ? 'active' : ''}`} onClick={() => selectView('opportunities')} title="Manage companies"><Building2 size={18} /><span className="nav-label">Manage companies</span></button>
+          </>}
+        </nav>
+        <div className="sidebar-spacer" />
+        {installPrompt && <button className="sidebar-action install-action" onClick={installApp}><Download size={17} /><span>Install app</span></button>}
+        <button className="sidebar-action signout-action" onClick={handleLogout}><LogOut size={17} /><span>Sign out</span></button>
+        <div className="sidebar-footnote">Driveboard · Campus opportunity desk</div>
       </aside>
       <main className="main-content" id="opportunities">
-        <header className="topbar"><div className="eyebrow">{isSpc ? 'Coordinator workspace' : 'Your opportunity desk'}</div><div className="topbar-actions"><button className="icon-button" title="Notifications"><Bell size={19} /></button><button className="text-button" onClick={handleLogout}><LogIn size={16} /> Sign out</button></div></header>
+        <header className="topbar"><div className="topbar-leading"><button className="nav-toggle" aria-label="Open navigation" title="Open navigation" onClick={() => { setSidebarOpen(true); setSidebarCollapsed(false) }}><Menu size={20} /></button><div className="eyebrow">{isSpc ? 'Coordinator workspace' : 'Your opportunity desk'}</div></div><div className="topbar-actions"><div className="notification-wrap" ref={notificationRef}><button className={`icon-button notification-button ${notificationsOpen ? 'selected' : ''}`} title="Saved opportunities and upcoming dates" aria-label={`Notifications${upcomingCount ? `, ${upcomingCount} upcoming` : ''}`} aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen((open) => !open)}><Bell size={19} />{upcomingCount > 0 && <span className="notification-badge">{upcomingCount}</span>}</button>{notificationsOpen && <section className="notification-panel" aria-label="Saved opportunities"><div className="notification-panel-header"><div><span className="section-kicker">Your board</span><h2>Saved opportunities</h2></div><button className="notification-close" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications"><X size={17} /></button></div>{savedOpportunities.length ? <div className="notification-list">{savedOpportunities.map((company) => <article className="notification-item" key={company.id}><span className="notification-mark"><CalendarDays size={16} /></span><div><strong>{company.name}</strong><span>{company.location}</span><small>{new Date(company.date).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</small></div></article>)}</div> : <p className="notification-empty">Save an opportunity with the heart button and its date will show up here.</p>}</section>}</div></div></header>
         <section className="welcome-row"><div><p className="kicker">Good morning, {user?.name?.split(' ')[0] || 'there'}</p><h1>Find the right <em>next move.</em></h1><p className="subhead">Discover companies, mark your interest, and stay ready for what is coming.</p></div><div className="date-stamp"><CalendarDays size={17} /><span>October 2026<br /><strong>Campus season</strong></span></div></section>
         <section className="stats-row"><div className="stat"><span className="stat-icon coral"><BriefcaseBusiness size={18} /></span><div><strong>{companies.length}</strong><span>open opportunities</span></div></div><div className="stat"><span className="stat-icon blue"><Heart size={18} /></span><div><strong>{companies.filter((company) => company.interested).length}</strong><span>students engaged</span></div></div><div className="stat"><span className="stat-icon gold"><Star size={18} /></span><div><strong>Ready</strong><span>your profile status</span></div></div></section>
         {error && <div className="error-banner"><CircleAlert size={18} />{error}<button onClick={() => setError('')}><X size={16} /></button></div>}
@@ -151,6 +212,7 @@ function App() {
     </div>
   )
 }
+
 
 function AuthScreen({ onAuthenticated }) {
   const [error, setError] = useState('')

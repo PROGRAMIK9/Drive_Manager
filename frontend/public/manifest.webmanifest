@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "Driveboard — Campus Opportunities",
+  "short_name": "Driveboard",
+  "description": "Discover campus companies, save opportunities, and stay ready for what is coming.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f5f0",
+  "theme_color": "#253842",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
