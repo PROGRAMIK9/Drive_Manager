@@ -225,7 +225,3 @@ blog.db
 !/migrations/
 /migrations/*
 !/migrations/versions/
-/migrations/versions/*
-!/migrations/versions/bc31d8e42a90_add_send_mail_process.py
-!/migrations/versions/cd42e9f3a1b7_google_sign_in.py
-!/migrations/versions/d8a3b1c9e204_add_event_reminders.py
