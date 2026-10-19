@@ -36,7 +36,10 @@ async def send_template_email(
     template_name: str,
     context: dict,
 ) -> None:
-    if mail_settings.BREVO_API_KEY:
+    api_key = mail_settings.BREVO_API_KEY.strip()
+    if api_key:
+        if "\r" in api_key or "\n" in api_key:
+            raise ValueError("BREVO_API_KEY must be a single line")
         template = template_environment.get_template(template_name)
         html = template.render(**context)
         payload = json.dumps({
@@ -54,7 +57,7 @@ async def send_template_email(
             "https://api.brevo.com/v3/smtp/email",
             body=payload,
             headers={
-                "api-key": mail_settings.BREVO_API_KEY,
+                "api-key": api_key,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
