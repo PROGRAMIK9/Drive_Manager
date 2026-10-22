@@ -29,6 +29,7 @@ def queue_interest_notification(
     recipient: str,
     recipient_name: str,
     company_name: str,
+    company_process: str,
     company_location: str,
     company_date: datetime,
 ) -> None:
@@ -38,6 +39,7 @@ def queue_interest_notification(
             recipient,
             recipient_name,
             company_name,
+            company_process,
             company_location,
             company_date.isoformat(),
         )

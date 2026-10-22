@@ -14,6 +14,7 @@ async def send_interest_notification(
     recipient: str,
     recipient_name: str,
     company_name: str,
+    company_process: str,
     company_location: str,
     company_date: str,
 ) -> None:
@@ -24,6 +25,7 @@ async def send_interest_notification(
         context={
             "recipient_name": recipient_name,
             "company_name": company_name,
+            "company_process": company_process.replace("_", " ").title(),
             "company_location": company_location,
             "company_date": datetime.fromisoformat(company_date),
         },
@@ -74,11 +76,12 @@ async def send_due_event_reminder(company_id: int, window: str = "hour") -> None
             for user in users:
                 await send_template_email(
                     recipient=user.email,
-                    subject=f"Event {'tomorrow' if day_before else 'starting soon'}: {company.name}",
+                    subject=f"Event Scheduled: {company.name}",
                     template_name="event_reminder.html",
                     context={
                         "recipient_name": user.name,
                         "company_name": company.name,
+                        "company_process": company.process.value.replace("_", " ").title(),
                         "company_location": company.location,
                         "company_date": company.date,
                     },

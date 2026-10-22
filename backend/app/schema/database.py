@@ -8,6 +8,9 @@ class Process(Enum):
     online_assesment = "online_assesment"
     interview = "interview"
     ppt = "ppt"
+    group_discussion = "group_discussion"
+    pen_paper_test = "pen_paper_test"
+    technical_assessment = "technical_assessment"
     send_mail = "send_mail"
 
 class Role(Enum):
