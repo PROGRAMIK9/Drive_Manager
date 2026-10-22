@@ -1,7 +1,7 @@
 """Add company event process values.
 
 Revision ID: cd53e8a412bf
-Revises: bc31d8e42a90
+Revises: ab42cd65ef90
 """
 from typing import Sequence, Union
 
@@ -9,7 +9,7 @@ from alembic import op
 
 
 revision: str = "cd53e8a412bf"
-down_revision: Union[str, Sequence[str], None] = "bc31d8e42a90"
+down_revision: Union[str, Sequence[str], None] = "ab42cd65ef90"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
