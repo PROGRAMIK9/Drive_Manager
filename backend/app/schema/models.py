@@ -115,6 +115,7 @@ class PendingOpportunityRead(SQLModel):
     interview_dates: list[str] = Field(default_factory=list)
     possible_duplicates: list[PossibleDuplicate] = Field(default_factory=list)
     application_link: str | None = None
+    additional_data: dict[str, Any] = Field(default_factory=dict)
     eligibility_status: EligibilityStatus
     ai_confidence: float | None = None
     missing_information: list[str]
@@ -152,6 +153,7 @@ class PendingOpportunityUpdate(SQLModel):
     interview_date: datetime | None = None
     interview_dates: list[str] | None = None
     application_link: str | None = None
+    additional_data: dict[str, Any] | None = None
 
 
 class OpportunityReject(SQLModel):

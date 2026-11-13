@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schema.database import Company, PendingPlacementOpportunity, Process, ProcessedEmail, Role
 from app.schema.models import PendingOpportunityRead, PendingOpportunityUpdate, PossibleDuplicate
 from app.service.mail_services import queue_event_reminder
+from app.service.placement_extraction import _merge_additional_details, extract_labeled_details
 
 
 def require_spc(user) -> None:
@@ -99,18 +100,29 @@ async def serialize_opportunity(
                 event_date=company.date,
             ))
     duplicates.sort(key=lambda match: (match.record_type, match.record_id, match.process, match.event_date))
+    source_data = source.extracted_data or {} if source else {}
+    source_body = str(source_data.get("body", ""))
+    placement_extraction = source_data.get("placement_extraction") or {}
+    extracted_data = placement_extraction.get("additional_details", {}) if isinstance(placement_extraction, dict) else {}
+    if not isinstance(extracted_data, dict):
+        extracted_data = {}
+    if item.additional_data is None:
+        additional_data = _merge_additional_details(extracted_data, extract_labeled_details(source_body))
+    else:
+        additional_data = item.additional_data
     return PendingOpportunityRead(
         **{
             key: getattr(item, key)
             for key in PendingOpportunityRead.model_fields
-            if key not in {"source_subject", "source_sender", "source_link", "source_body", "extracted_details", "source_attachments", "possible_duplicates"}
+            if key not in {"source_subject", "source_sender", "source_link", "source_body", "extracted_details", "source_attachments", "possible_duplicates", "additional_data"}
         },
         source_subject=source.subject if source else None,
         source_sender=source.sender if source else None,
         source_link=source.source_link if source else None,
-        source_body=str((source.extracted_data or {}).get("body", "")) if source else None,
-        extracted_details=(source.extracted_data or {}).get("placement_extraction", {}) if source else {},
-        source_attachments=(source.extracted_data or {}).get("attachments", []) if source else [],
+        source_body=source_body or None,
+        extracted_details=source_data.get("placement_extraction", {}),
+        additional_data=additional_data,
+        source_attachments=source_data.get("attachments", []),
         possible_duplicates=duplicates,
     )
 

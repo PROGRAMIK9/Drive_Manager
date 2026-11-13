@@ -218,6 +218,7 @@ class PendingPlacementOpportunity(SQLModel, table=True):
     interview_date: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
     interview_dates: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
     application_link: str | None = Field(default=None)
+    additional_data: dict[str, Any] | None = Field(default=None, sa_column=Column(sa.JSON, nullable=True))
     eligibility_status: str = Field(default="UNCLEAR", max_length=24, index=True)
     ai_confidence: float | None = Field(default=None)
     missing_information: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))

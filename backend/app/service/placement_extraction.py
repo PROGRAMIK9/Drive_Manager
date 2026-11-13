@@ -1,5 +1,6 @@
 """Extract placement facts from college-sent emails with a hosted or local LLM."""
 import json
+import html
 import logging
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -34,6 +35,63 @@ Return all fields with these types: is_placement_opportunity (boolean), company_
 
 Do not omit any stated pay figure. If an email gives both stipend and CTC, include both verbatim in compensation or additional_details, preserving fixed/variable breakdowns. Also preserve labeled facts such as vacancies, company website, location/address, rounds, and job description. Never replace a specific field with a generic value such as "send mail".
 """
+
+_LABELED_DETAIL_RE = re.compile(r"^\s*(?:[-•]\s*)?(.{2,80}?)\s*:\s*(.*)$")
+_NON_DETAIL_LABELS = {"from", "to", "cc", "bcc", "subject", "date", "sent", "reply-to"}
+_MULTILINE_DETAIL_LABELS = {
+    "address", "internship location", "job location", "work location", "rounds",
+    "selection process", "job description", "jd", "eligibility criteria",
+}
+
+
+def extract_labeled_details(body: str) -> dict[str, str]:
+    """Capture labeled facts directly from the email so one missed LLM field is not lost."""
+    text = re.sub(r"(?i)<(?:br\s*/?|/(?:p|div|li|tr|h[1-6]))\b[^>]*>", "\n", body)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    text = text.replace("**", "").replace("__", "").replace("\xa0", " ")
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    details: dict[str, str] = {}
+    for index, line in enumerate(lines):
+        match = _LABELED_DETAIL_RE.match(line)
+        if not match:
+            continue
+        label = re.sub(r"\s+", " ", match.group(1).strip(" -*_:")).strip()
+        normalized_label = label.casefold()
+        if not label or normalized_label in _NON_DETAIL_LABELS:
+            continue
+        value = match.group(2).strip(" ,\t")
+        continuation: list[str] = []
+        if normalized_label in _MULTILINE_DETAIL_LABELS:
+            for candidate in lines[index + 1:]:
+                if not candidate:
+                    if continuation:
+                        break
+                    continue
+                if _LABELED_DETAIL_RE.match(candidate):
+                    break
+                if re.match(r"^(?:hello everyone|dear students|interested students|regards\b|thanks\b)", candidate, re.I):
+                    break
+                if len(continuation) >= 12:
+                    break
+                continuation.append(candidate)
+            value = "; ".join([value, *continuation]).strip(" ;")
+        if value:
+            details[label] = value[:4000]
+    return details
+
+
+def _merge_additional_details(llm_details: dict[str, Any], source_details: dict[str, str]) -> dict[str, Any]:
+    merged = dict(llm_details)
+    normalized_keys = {re.sub(r"[^a-z0-9]", "", key.casefold()): key for key in merged}
+    for key, value in source_details.items():
+        normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
+        existing_key = normalized_keys.get(normalized)
+        if existing_key:
+            merged[existing_key] = value
+        else:
+            merged[key] = value
+            normalized_keys[normalized] = key
+    return merged
 
 
 def _empty_result() -> dict[str, Any]:
@@ -141,6 +199,9 @@ async def extract_placement_email(subject: str, sender: str, received_at: dateti
     result.update(raw)
     if not isinstance(result.get("additional_details"), dict):
         result["additional_details"] = {}
+    result["additional_details"] = _merge_additional_details(
+        result["additional_details"], extract_labeled_details(body),
+    )
     for key in ("eligible_courses", "eligible_branches", "excluded_courses", "excluded_branches", "interview_dates", "missing_information"):
         value = result.get(key)
         result[key] = [str(item).strip() for item in value if str(item).strip()] if isinstance(value, list) else []

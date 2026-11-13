@@ -41,9 +41,7 @@ function formatOpportunityDate(value) {
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-const SOURCE_FACT_LABELS = /^(?:name of (?:the )?company|company|website|eligibility criteria|profile offered|role offered|internship location|job location|work location|location|internship stipend|stipend|ctc(?: offered)?|salary|compensation|package|fixed salary|variable salary|vacancies|no\.?(?: of)? vacancies|rounds|selection process|job description|jd|internship duration|address|role conversion|conversion to fte|pbc|skills required|benefits)\s*:/i
-
-function buildAnnouncementBody(company, opportunity, sourceBody = '') {
+function buildAnnouncementBody(company, opportunity, selectedAdditionalData = {}) {
   const facts = []
   const keys = new Set()
   const add = (label, value) => {
@@ -73,11 +71,6 @@ function buildAnnouncementBody(company, opportunity, sourceBody = '') {
   add('Job location', opportunity?.location || details.location || details.job_location || details.internship_location || company.location)
   const compensation = opportunity?.compensation || details.compensation
   add('Compensation', compensation)
-  const ctc = details.ctc_offered || details.ctc || details.salary
-  const stipend = details.stipend
-  const normalizedCompensation = factText(compensation).toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
-  if (ctc && !normalizedCompensation.includes(factText(ctc).toLocaleLowerCase().replace(/[^a-z0-9]+/g, ''))) add('CTC / salary', ctc)
-  if (stipend && !normalizedCompensation.includes(factText(stipend).toLocaleLowerCase().replace(/[^a-z0-9]+/g, ''))) add('Internship stipend', stipend)
   add('Internship duration', opportunity?.internship_duration || details.internship_duration)
   add('Online assessment date', formatOpportunityDate(opportunity?.assessment_date || details.assessment_date || details.oa_date))
   add('Group discussion date', formatOpportunityDate(opportunity?.group_discussion_date || details.group_discussion_date || details.gd_date))
@@ -87,56 +80,8 @@ function buildAnnouncementBody(company, opportunity, sourceBody = '') {
   const interviews = interviewValues.filter(Boolean).map(formatOpportunityDate).join(', ')
   add('Interview dates', interviews)
 
-  const standardKeys = new Set([
-    'company_name', 'name_of_company', 'job_title', 'profile', 'profile_offered', 'opportunity_type',
-    'description', 'job_description', 'eligibility', 'eligibility_criteria', 'location', 'job_location', 'internship_location', 'compensation',
-    'salary', 'ctc', 'ctc_offered', 'stipend', 'internship_duration', 'minimum_cgpa', 'backlog_allowed', 'maximum_backlogs', 'application_link', 'application_deadline', 'oa_date', 'gd_date',
-    'department_submission_date', 'assessment_date', 'group_discussion_date', 'interview_date',
-    'interview_dates', 'original_email_body', 'confidence', 'ai_confidence', 'missing_information',
-    'is_placement_opportunity',
-  ])
-  for (const [key, value] of Object.entries(details)) {
-    if (standardKeys.has(key.toLocaleLowerCase())) continue
+  for (const [key, value] of Object.entries(selectedAdditionalData || {})) {
     add(key.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()), value)
-  }
-
-  const normalizedFacts = () => facts.join(' ').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
-  const sourceLines = sourceBody
-    .replace(/<\/?(?:div|p|br|li|tr|h[1-6])\b[^>]*>/gi, '\n')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;|&#160;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\*\*/g, '').replace(/__?/g, '').replace(/\s+/g, ' ').trim())
-  for (let i = 0; i < sourceLines.length; i += 1) {
-    const line = sourceLines[i]
-    const match = line.match(/^([^:]{2,70}):\s*(.*)$/)
-    if (!match || !SOURCE_FACT_LABELS.test(`${match[1]}:`)) continue
-    const label = match[1].replace(/^[-*\s]+|[-*\s]+$/g, '').trim()
-    let value = match[2].replace(/^[,\s]+|[\s,]+$/g, '').trim()
-    const collectsFollowingLines = /^(?:rounds|selection process|internship location|job location|work location|address)$/i.test(label)
-    if ((!value && !collectsFollowingLines) || /(?:consent|google|registration|application) form.*\b(?:by|deadline)\b/i.test(line)) continue
-    if (/^(?:from|to|cc|bcc|subject|date|sent)$/i.test(label)) continue
-    if (collectsFollowingLines) {
-      const continuation = []
-      for (let next = i + 1; next < sourceLines.length; next += 1) {
-        const candidate = sourceLines[next]
-        if (!candidate) continue
-        if (/^(?:hello everyone|dear students|interested students|regards\b|thanks\b)/i.test(candidate)) break
-        if (/database|student list|student data/i.test(candidate) && /\b(?:submit|send|share|provide)\b/i.test(candidate)) break
-        if (/^[^:]{2,70}:\s*/.test(candidate) && SOURCE_FACT_LABELS.test(candidate)) break
-        continuation.push(candidate)
-        i = next
-        if (continuation.length >= 12) break
-      }
-      if (continuation.length) value = [value, ...continuation].filter(Boolean).join('; ')
-    }
-    if (!value) continue
-    const normalizedValue = value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
-    if (!normalizedValue || normalizedFacts().includes(normalizedValue)) continue
-    const existingKey = label.toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-    if (keys.has(existingKey)) facts.push(`${label} (from placement email): ${value}`)
-    else add(label, value)
   }
   return `Hello everyone,\n\n${company.name} is recruiting students. Please find the details below:\n\n${facts.join('\n\n')}`
 }
@@ -146,11 +91,11 @@ function formatDeadline(time) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(new Date()).map((part) => [part.type, part.value]))
-  const tomorrow = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + 1))
-  const dateLabel = tomorrow.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+  const today = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day)))
+  const dateLabel = today.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
   const hour12 = (hour % 12) || 12
   const period = hour >= 12 ? 'PM' : 'AM'
-  return `tomorrow (${dateLabel}) at ${hour12}:${String(minute).padStart(2, '0')} ${period} IST`
+  return `today (${dateLabel}) at ${hour12}:${String(minute).padStart(2, '0')} ${period} IST`
 }
 
 function App() {
@@ -522,7 +467,8 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
   const [formDeadlineTime, setFormDeadlineTime] = useState('20:00')
   const [draft, setDraft] = useState(null)
   const [sourceBody, setSourceBody] = useState('')
-  const [additionalDetails, setAdditionalDetails] = useState('{}')
+  const [additionalData, setAdditionalData] = useState({})
+  const [selectedAdditionalKeys, setSelectedAdditionalKeys] = useState([])
   const [includeOriginalBody, setIncludeOriginalBody] = useState(false)
   const lists = config?.recipient_lists || []
   const selectedList = lists.find((item) => item.list_key === listKey)
@@ -533,7 +479,7 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
   const [body, setBody] = useState('')
 
   useEffect(() => {
-    if (!companyId) { setPlacementSource(null); setSourceBody(''); setAdditionalDetails('{}'); setExtraLinks(''); setFiles([]); return }
+    if (!companyId) { setPlacementSource(null); setSourceBody(''); setAdditionalData({}); setSelectedAdditionalKeys([]); setExtraLinks(''); setFiles([]); return }
     setPlacementSource(null)
     setSourceBody('')
     setExtraLinks('')
@@ -542,7 +488,9 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
       const source = items.find((item) => String(item.published_company_id) === String(companyId))
       setPlacementSource(source || null)
       setSourceBody(source?.source_body || '')
-      setAdditionalDetails(JSON.stringify(source?.extracted_details?.additional_details || {}, null, 2))
+      const facts = source?.additional_data || {}
+      setAdditionalData(facts)
+      setSelectedAdditionalKeys([])
       const urls = [...new Set([
         source?.application_link,
         ...(source?.source_body?.match(/https?:\/\/[^\s<>()]+/g) || []).map((url) => url.replace(/[),.;]+$/, '')),
@@ -566,9 +514,10 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
     if (selectedCompany && currentTemplate.subject) {
       setSubject(currentTemplate.subject.replaceAll('{company_name}', selectedCompany.name).replaceAll('{role}', selectedCompany.process.replaceAll('_', ' ')))
       const source = String(placementSource?.published_company_id) === String(selectedCompany.id) ? placementSource : null
-      setBody(buildAnnouncementBody(selectedCompany, source, sourceBody))
+      const selectedFacts = Object.fromEntries(selectedAdditionalKeys.filter((key) => Object.hasOwn(additionalData, key)).map((key) => [key, additionalData[key]]))
+      setBody(buildAnnouncementBody(selectedCompany, source, selectedFacts))
     }
-  }, [companyId, placementSource, sourceBody, selectedCompany?.name, selectedCompany?.process])
+  }, [companyId, placementSource, sourceBody, additionalData, selectedAdditionalKeys, selectedCompany?.name, selectedCompany?.process])
 
   function splitEmails(value) { return value.split(/[\s,;]+/).map((email) => email.trim()).filter(Boolean) }
   async function saveConfig() {
@@ -648,9 +597,7 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
     setBusy(true)
     try {
       const parsedLinks = extraLinks.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => { const [label, url] = line.split('|').map((part) => part.trim()); return { label: label || 'More information', url: url || label } })
-      let details
-      try { details = additionalDetails.trim() ? JSON.parse(additionalDetails) : {} } catch { throw new Error('Additional details must be valid JSON.') }
-      if (!details || typeof details !== 'object' || Array.isArray(details)) throw new Error('Additional details must be a JSON object.')
+      const details = Object.fromEntries(selectedAdditionalKeys.filter((key) => Object.hasOwn(additionalData, key)).map((key) => [key, additionalData[key]]))
       if (includeOriginalBody && sourceBody.trim()) details.original_email_body = sourceBody
       const consentDeadline = `Interested students are requested to submit the consent form by ${formatDeadline(formDeadlineTime)}: ${consentUrl}`
       const missingLinkLines = parsedLinks.filter((link) => !body.includes(link.url)).map((link) => `${link.label}: ${link.url}`)
@@ -707,7 +654,9 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
           </div>
         </details>
       </div>
-      <article className="interest-panel announcement-form campaign-form"><h3>Compose announcement</h3><p>The message is prefilled with the placement email details, links, and attached documents. Review and edit it before sending.</p><div className="form-columns"><label>Published opportunity<select value={companyId} onChange={(e) => setCompanyId(e.target.value)}><option value="">Choose company</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name} · {company.process.replaceAll('_', ' ')}</option>)}</select></label><label>Distribution list<select value={listKey} onChange={(e) => setListKey(e.target.value)}>{lists.map((item) => <option key={item.id} value={item.list_key}>{item.name} · {item.active_count} active</option>)}</select></label><label>Consent Google Form URL<input value={consentUrl} onChange={(e) => setConsentUrl(e.target.value)} placeholder="https://docs.google.com/forms/..." /></label><label>Form deadline time (tomorrow)<input type="time" value={formDeadlineTime} onChange={(e) => setFormDeadlineTime(e.target.value)} /><small>Students will be asked to submit by {formatDeadline(formDeadlineTime)}.</small></label><label>To<input value={toText || config?.placement_director_email || ''} onChange={(e) => setToText(e.target.value)} /></label><label>CC<input value={ccText || [...(config?.co_spc_emails || []), config?.staff_coordinator_email].filter(Boolean).join(', ')} onChange={(e) => setCcText(e.target.value)} /></label><label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label></div><label>Message<textarea rows={14} value={body} onChange={(e) => setBody(e.target.value)} /></label>{sourceBody && <><label className="source-email-toggle"><input type="checkbox" checked={includeOriginalBody} onChange={(e) => setIncludeOriginalBody(e.target.checked)} /> Include the original placement email below the formatted details</label><details className="source-email-body"><summary>View original placement email</summary><pre>{sourceBody}</pre></details></>}<label>Links <small>One per line: Label | https://…</small><textarea rows={3} value={extraLinks} onChange={(e) => setExtraLinks(e.target.value)} placeholder="Job description | https://…" /></label><label>Add documents (PDF, DOC, DOCX, XLSX; up to 8 MB each)<input type="file" accept=".pdf,.doc,.docx,.xlsx" multiple onChange={uploadFiles} /></label>{files.map((file, index) => <div className="file-chip" key={`${file.filename}-${index}`}><span>{file.filename}{file.kind === 'inbox' ? ' · from placement email' : ''}</span><button onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}>Remove</button></div>)}<div className="review-actions"><button className="primary-button" disabled={busy} onClick={createDraft}>Save draft and preview</button>{draft && <button className="primary-button" disabled={busy || draft.status !== 'DRAFT'} onClick={sendDraft}>Send announcement</button>}</div>
+      <article className="interest-panel announcement-form campaign-form"><h3>Compose announcement</h3><p>The message is prefilled with the placement email details, links, and attached documents. Review and edit it before sending.</p><div className="form-columns"><label>Published opportunity<select value={companyId} onChange={(e) => setCompanyId(e.target.value)}><option value="">Choose company</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name} · {company.process.replaceAll('_', ' ')}</option>)}</select></label><label>Distribution list<select value={listKey} onChange={(e) => setListKey(e.target.value)}>{lists.map((item) => <option key={item.id} value={item.list_key}>{item.name} · {item.active_count} active</option>)}</select></label><label>Consent Google Form URL<input value={consentUrl} onChange={(e) => setConsentUrl(e.target.value)} placeholder="https://docs.google.com/forms/..." /></label><label>Form deadline time (today)<input type="time" value={formDeadlineTime} onChange={(e) => setFormDeadlineTime(e.target.value)} /><small>Students will be asked to submit by {formatDeadline(formDeadlineTime)}.</small></label><label>To<input value={toText || config?.placement_director_email || ''} onChange={(e) => setToText(e.target.value)} /></label><label>CC<input value={ccText || [...(config?.co_spc_emails || []), config?.staff_coordinator_email].filter(Boolean).join(', ')} onChange={(e) => setCcText(e.target.value)} /></label><label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label></div>
+      {Object.keys(additionalData).length > 0 && <fieldset className="additional-fact-selector"><legend>Additional facts from the email</legend><p>Select which extra details to include. Standard fields above are already included when present.</p>{Object.entries(additionalData).map(([key, value]) => <label className="additional-fact-option" key={key}><input type="checkbox" checked={selectedAdditionalKeys.includes(key)} onChange={(event) => setSelectedAdditionalKeys((current) => event.target.checked ? [...current, key] : current.filter((item) => item !== key))} /><span><strong>{key}</strong><small>{factText(value)}</small></span></label>)}</fieldset>}
+      <label>Message<textarea rows={14} value={body} onChange={(e) => setBody(e.target.value)} /></label>{sourceBody && <><label className="source-email-toggle"><input type="checkbox" checked={includeOriginalBody} onChange={(e) => setIncludeOriginalBody(e.target.checked)} /> Include the original placement email below the formatted details</label><details className="source-email-body"><summary>View original placement email</summary><pre>{sourceBody}</pre></details></>}<label>Links <small>One per line: Label | https://…</small><textarea rows={3} value={extraLinks} onChange={(e) => setExtraLinks(e.target.value)} placeholder="Job description | https://…" /></label><label>Add documents (PDF, DOC, DOCX, XLSX; up to 8 MB each)<input type="file" accept=".pdf,.doc,.docx,.xlsx" multiple onChange={uploadFiles} /></label>{files.map((file, index) => <div className="file-chip" key={`${file.filename}-${index}`}><span>{file.filename}{file.kind === 'inbox' ? ' · from placement email' : ''}</span><button onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}>Remove</button></div>)}<div className="review-actions"><button className="primary-button" disabled={busy} onClick={createDraft}>Save draft and preview</button>{draft && <button className="primary-button" disabled={busy || draft.status !== 'DRAFT'} onClick={sendDraft}>Send announcement</button>}</div>
       {draft && <div className="campaign-preview"><span className="section-kicker">Preview · {draft.status}</span><h3>{draft.subject}</h3><p>From: {draft.sender_email} · To: {draft.to_emails.join(', ')} · CC: {draft.cc_emails.join(', ') || 'None'} · BCC: {draft.bcc_count} students</p><pre>{draft.body}{draft.include_signature && draft.signature_text ? `\n\n${draft.signature_text}` : ''}</pre><p>Attachments: {draft.attachment_names.join(', ') || 'None'}</p></div>}</article>
       <section className="interest-list"><h3>Campaign history</h3>{campaigns.map((campaign) => <article className="interest-panel campaign-row" key={campaign.id}><div><strong>{campaign.subject}</strong><span>{campaign.status} · {campaign.sender_email} · {campaign.bcc_count} BCC recipients</span><small>{new Date(campaign.created_at).toLocaleString()}</small>{campaign.error_details && <small className="review-warning">{campaign.error_details}</small>}</div></article>)}</section>
     </>}
@@ -740,6 +689,7 @@ function ReviewOpportunity({ item, token, onUpdate, onError, onOpenMatch }) {
     {item.possible_duplicates?.length > 0 && <div className="duplicate-warning" role="note"><strong>Possible duplicate</strong><span>Same normalized company, process, and date found:</span><ul>{item.possible_duplicates.map((match) => <li key={`${match.record_type}-${match.record_id}-${match.process}-${match.event_date}`}><button type="button" onClick={() => onOpenMatch(match)}>Open {match.record_type === 'PENDING' ? 'pending review' : 'published company'} #{match.record_id}</button><span>{match.company_name} · {match.process.replaceAll('_', ' ')} · {new Date(match.event_date).toLocaleDateString()}</span></li>)}</ul></div>}
     {item.description && <p className="review-copy">{item.description}</p>}
     <div className="review-facts"><span>Department submission: {item.department_submission_date ? new Date(item.department_submission_date).toLocaleString() : 'Not specified'}</span><span>OA: {item.assessment_date ? new Date(item.assessment_date).toLocaleString() : 'Not specified'}</span><span>GD: {item.group_discussion_date ? new Date(item.group_discussion_date).toLocaleString() : 'Not specified'}</span><span>Interview dates: {item.interview_dates?.length ? item.interview_dates.map(formatInterviewDate).join(', ') : item.interview_date ? new Date(item.interview_date).toLocaleString() : 'Not specified'}</span><span>Application deadline: {item.application_deadline ? new Date(item.application_deadline).toLocaleString() : 'Not specified'}</span><span>Courses: {item.eligible_courses.join(', ') || 'Unspecified'}</span><span>Batches: {item.eligible_batches.join(', ') || 'Unspecified'}</span><span>Minimum CGPA: {item.minimum_cgpa ?? 'Unspecified'}</span><span>AI confidence: {item.ai_confidence ?? 'Not available'}</span></div>
+    {Object.keys(item.additional_data || {}).length > 0 && <details className="review-additional-data"><summary>Other extracted facts · {Object.keys(item.additional_data).length}</summary><dl>{Object.entries(item.additional_data).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{factText(value)}</dd></div>)}</dl></details>}
     {item.missing_information.length > 0 && <p className="review-warning">Needs clarification: {item.missing_information.join(', ')}</p>}
     {(item.source_subject || item.source_sender) && <p className="review-source">Source: {item.source_subject || 'Email'}{item.source_sender ? ` · ${item.source_sender}` : ''}{item.source_link && <> · <a href={item.source_link} target="_blank" rel="noreferrer">Open original</a></>}</p>}
     {item.review_status === 'PENDING' && <div className="review-actions"><button className="secondary-button" onClick={() => setEditing(true)}>Edit details</button><button className="secondary-button" onClick={() => act('/reject', { reason: window.prompt('Reason for rejection') || 'Rejected by SPC' })}>Reject</button><button className="primary-button" onClick={() => act('/approve')}>Approve and publish</button></div>}
@@ -786,6 +736,7 @@ function ReviewEditModal({ item, saving, onClose, onSave }) {
     assessment_date: toLocalDateTime(item.assessment_date),
     group_discussion_date: toLocalDateTime(item.group_discussion_date),
     interview_dates: (item.interview_dates?.length ? item.interview_dates : item.interview_date ? [item.interview_date] : []).map(toInterviewInput),
+    additional_data: Object.entries(item.additional_data || {}).map(([key, value]) => ({ key, value: factText(value) })),
   }))
   const setField = (field, value) => setForm((current) => ({ ...current, [field]: value }))
 
@@ -807,6 +758,7 @@ function ReviewEditModal({ item, saving, onClose, onSave }) {
       group_discussion_date: localDateTimeToIso(form.group_discussion_date),
       interview_date: interviewSlots[0]?.eventDate || null,
       interview_dates: interviewDates,
+      additional_data: Object.fromEntries(form.additional_data.map(({ key, value }) => [key.trim(), value.trim()]).filter(([key, value]) => key && value)),
     })
   }
 
@@ -825,6 +777,9 @@ function ReviewEditModal({ item, saving, onClose, onSave }) {
         </div>
         <div className="interview-date-editor"><div className="interview-date-heading"><strong>Interview dates and times</strong><button type="button" className="text-button" onClick={() => setField('interview_dates', [...form.interview_dates, ''])}><Plus size={15} /> Add date</button></div>
           {form.interview_dates.map((slot, index) => <div className="interview-date-row" key={index}><label>Interview {index + 1} date<input type="date" value={slot.date} onChange={(event) => setField('interview_dates', form.interview_dates.map((current, row) => row === index ? { ...current, date: event.target.value } : current))} /></label><label>Time (optional)<input type="time" value={slot.time} onChange={(event) => setField('interview_dates', form.interview_dates.map((current, row) => row === index ? { ...current, time: event.target.value } : current))} /></label><button type="button" className="interview-date-remove" aria-label={`Remove interview ${index + 1}`} disabled={saving} onClick={() => setField('interview_dates', form.interview_dates.filter((_, row) => row !== index))}><X size={17} /></button></div>)}
+        </div>
+        <div className="additional-data-editor"><div className="interview-date-heading"><strong>Additional facts from the email</strong><button type="button" className="text-button" onClick={() => setField('additional_data', [...form.additional_data, { key: '', value: '' }])}><Plus size={15} /> Add fact</button></div><p>Keep or correct any details that did not fit the standard fields, such as CTC, stipend, vacancies, rounds, or address.</p>
+          {form.additional_data.map((fact, index) => <div className="additional-data-row" key={index}><label>Fact<input value={fact.key} placeholder="CTC offered" onChange={(event) => setField('additional_data', form.additional_data.map((item, row) => row === index ? { ...item, key: event.target.value } : item))} /></label><label>Value<input value={fact.value} placeholder="₹12 LPA fixed" onChange={(event) => setField('additional_data', form.additional_data.map((item, row) => row === index ? { ...item, value: event.target.value } : item))} /></label><button type="button" className="interview-date-remove" aria-label={`Remove fact ${index + 1}`} disabled={saving} onClick={() => setField('additional_data', form.additional_data.filter((_, row) => row !== index))}><X size={17} /></button></div>)}
         </div>
         <div className="modal-actions"><button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save details'}</button></div>
       </form>

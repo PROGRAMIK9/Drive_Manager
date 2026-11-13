@@ -138,6 +138,7 @@ async def _extract_and_queue(session, email_row: ProcessedEmail) -> str:
             interview_date=parse_extracted_date(result.get("interview_date")),
             interview_dates=interview_dates,
             application_link=result.get("application_link"),
+            additional_data=result.get("additional_details", {}),
             eligibility_status=eligibility.status,
             ai_confidence=result.get("confidence"),
             missing_information=list(dict.fromkeys(missing)),
