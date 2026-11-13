@@ -345,6 +345,8 @@ function AuthScreen({ onAuthenticated }) {
 }
 
 function ReviewOpportunity({ item, token, onUpdate, onError, onOpenMatch }) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
   async function act(action, payload) {
     try {
       const updated = await request(`/api/admin/placement/pending/${item.id}${action}`, {
@@ -353,18 +355,111 @@ function ReviewOpportunity({ item, token, onUpdate, onError, onOpenMatch }) {
         ...(payload ? { body: JSON.stringify(payload) } : {}),
       })
       onUpdate(updated)
-    } catch (error) { onError(error.message) }
+      return true
+    } catch (error) { onError(error.message); return false }
   }
-  return <article id={`pending-opportunity-${item.id}`} className="interest-panel review-card">
+  async function saveDetails(payload) {
+    setSaving(true)
+    const saved = await act('', payload)
+    setSaving(false)
+    if (saved) setEditing(false)
+  }
+  return <>
+  <article id={`pending-opportunity-${item.id}`} className="interest-panel review-card">
     <div className="interest-heading"><div><span className={`review-status ${item.eligibility_status.toLowerCase()}`}>{item.eligibility_status.replaceAll('_', ' ')}</span><h3>{item.company_name}{item.job_title ? ` · ${item.job_title}` : ''}</h3><span className="company-meta">{item.opportunity_type || 'Placement opportunity'} · {item.location || 'Location not specified'}</span></div><span className="role-badge">{item.review_status}</span></div>
     {item.possible_duplicates?.length > 0 && <div className="duplicate-warning" role="note"><strong>Possible duplicate</strong><span>Same normalized company, process, and date found:</span><ul>{item.possible_duplicates.map((match) => <li key={`${match.record_type}-${match.record_id}-${match.process}-${match.event_date}`}><button type="button" onClick={() => onOpenMatch(match)}>Open {match.record_type === 'PENDING' ? 'pending review' : 'published company'} #{match.record_id}</button><span>{match.company_name} · {match.process.replaceAll('_', ' ')} · {new Date(match.event_date).toLocaleDateString()}</span></li>)}</ul></div>}
     {item.description && <p className="review-copy">{item.description}</p>}
-    <div className="review-facts"><span>Department submission: {item.department_submission_date ? new Date(item.department_submission_date).toLocaleString() : 'Not specified'}</span><span>OA: {item.assessment_date ? new Date(item.assessment_date).toLocaleString() : 'Not specified'}</span><span>GD: {item.group_discussion_date ? new Date(item.group_discussion_date).toLocaleString() : 'Not specified'}</span><span>Interview dates: {item.interview_dates?.length ? item.interview_dates.map((date) => new Date(date).toLocaleString()).join(', ') : item.interview_date ? new Date(item.interview_date).toLocaleString() : 'Not specified'}</span><span>Application deadline: {item.application_deadline ? new Date(item.application_deadline).toLocaleString() : 'Not specified'}</span><span>Courses: {item.eligible_courses.join(', ') || 'Unspecified'}</span><span>Batches: {item.eligible_batches.join(', ') || 'Unspecified'}</span><span>Minimum CGPA: {item.minimum_cgpa ?? 'Unspecified'}</span><span>AI confidence: {item.ai_confidence ?? 'Not available'}</span></div>
+    <div className="review-facts"><span>Department submission: {item.department_submission_date ? new Date(item.department_submission_date).toLocaleString() : 'Not specified'}</span><span>OA: {item.assessment_date ? new Date(item.assessment_date).toLocaleString() : 'Not specified'}</span><span>GD: {item.group_discussion_date ? new Date(item.group_discussion_date).toLocaleString() : 'Not specified'}</span><span>Interview dates: {item.interview_dates?.length ? item.interview_dates.map(formatInterviewDate).join(', ') : item.interview_date ? new Date(item.interview_date).toLocaleString() : 'Not specified'}</span><span>Application deadline: {item.application_deadline ? new Date(item.application_deadline).toLocaleString() : 'Not specified'}</span><span>Courses: {item.eligible_courses.join(', ') || 'Unspecified'}</span><span>Batches: {item.eligible_batches.join(', ') || 'Unspecified'}</span><span>Minimum CGPA: {item.minimum_cgpa ?? 'Unspecified'}</span><span>AI confidence: {item.ai_confidence ?? 'Not available'}</span></div>
     {item.missing_information.length > 0 && <p className="review-warning">Needs clarification: {item.missing_information.join(', ')}</p>}
     {(item.source_subject || item.source_sender) && <p className="review-source">Source: {item.source_subject || 'Email'}{item.source_sender ? ` · ${item.source_sender}` : ''}{item.source_link && <> · <a href={item.source_link} target="_blank" rel="noreferrer">Open original</a></>}</p>}
-    {item.review_status === 'PENDING' && <div className="review-actions"><button className="secondary-button" onClick={() => { const company_name = window.prompt('Company name', item.company_name); if (!company_name) return; const application_deadline = window.prompt('Application deadline (ISO date/time)', item.application_deadline || ''); act('', { company_name, application_deadline: application_deadline || null }) }}>Edit details</button><button className="secondary-button" onClick={() => act('/reject', { reason: window.prompt('Reason for rejection') || 'Rejected by SPC' })}>Reject</button><button className="primary-button" onClick={() => act('/approve')}>Approve and publish</button></div>}
+    {item.review_status === 'PENDING' && <div className="review-actions"><button className="secondary-button" onClick={() => setEditing(true)}>Edit details</button><button className="secondary-button" onClick={() => act('/reject', { reason: window.prompt('Reason for rejection') || 'Rejected by SPC' })}>Reject</button><button className="primary-button" onClick={() => act('/approve')}>Approve and publish</button></div>}
     {item.rejection_reason && <p className="review-warning">Rejected: {item.rejection_reason}</p>}
   </article>
+  {editing && <ReviewEditModal item={item} saving={saving} onClose={() => setEditing(false)} onSave={saveDetails} />}
+  </>
+}
+
+function toLocalDateTime(value) {
+  if (!value) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${value}T00:00`
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
+
+function localDateTimeToIso(value) {
+  return value ? new Date(value).toISOString() : null
+}
+
+function formatInterviewDate(value) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number)
+    return new Date(year, month - 1, day).toLocaleDateString()
+  }
+  return new Date(value).toLocaleString()
+}
+
+function toInterviewInput(value) {
+  if (!value) return { date: '', time: '' }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return { date: value, time: '' }
+  const local = toLocalDateTime(value)
+  return { date: local.slice(0, 10), time: local.slice(11, 16) }
+}
+
+function ReviewEditModal({ item, saving, onClose, onSave }) {
+  const [form, setForm] = useState(() => ({
+    company_name: item.company_name || '',
+    job_title: item.job_title || '',
+    location: item.location || '',
+    application_deadline: toLocalDateTime(item.application_deadline),
+    department_submission_date: toLocalDateTime(item.department_submission_date),
+    assessment_date: toLocalDateTime(item.assessment_date),
+    group_discussion_date: toLocalDateTime(item.group_discussion_date),
+    interview_dates: (item.interview_dates?.length ? item.interview_dates : item.interview_date ? [item.interview_date] : []).map(toInterviewInput),
+  }))
+  const setField = (field, value) => setForm((current) => ({ ...current, [field]: value }))
+
+  function submit(event) {
+    event.preventDefault()
+    const interviewSlots = form.interview_dates.filter((slot) => slot.date).map((slot) => ({
+      date: slot.date,
+      value: slot.time ? localDateTimeToIso(`${slot.date}T${slot.time}`) : slot.date,
+      eventDate: localDateTimeToIso(`${slot.date}T${slot.time || '00:00'}`),
+    })).sort((a, b) => a.date.localeCompare(b.date) || a.value.localeCompare(b.value))
+    const interviewDates = interviewSlots.map((slot) => slot.value)
+    onSave({
+      company_name: form.company_name.trim(),
+      job_title: form.job_title.trim() || null,
+      location: form.location.trim() || null,
+      application_deadline: localDateTimeToIso(form.application_deadline),
+      department_submission_date: localDateTimeToIso(form.department_submission_date),
+      assessment_date: localDateTimeToIso(form.assessment_date),
+      group_discussion_date: localDateTimeToIso(form.group_discussion_date),
+      interview_date: interviewSlots[0]?.eventDate || null,
+      interview_dates: interviewDates,
+    })
+  }
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
+    <section className="modal review-edit-modal" role="dialog" aria-modal="true" aria-labelledby={`review-edit-title-${item.id}`}>
+      <div className="modal-header"><div><span className="section-kicker">SPC review</span><h2 id={`review-edit-title-${item.id}`}>Edit opportunity details</h2></div><button className="icon-button" type="button" aria-label="Close edit form" disabled={saving} onClick={onClose}><X size={19} /></button></div>
+      <form onSubmit={submit}>
+        <div className="review-edit-grid">
+          <label>Company name<input required value={form.company_name} onChange={(event) => setField('company_name', event.target.value)} /></label>
+          <label>Role / position<input value={form.job_title} onChange={(event) => setField('job_title', event.target.value)} /></label>
+          <label>Location<input value={form.location} onChange={(event) => setField('location', event.target.value)} /></label>
+          <label>Application deadline<input type="datetime-local" value={form.application_deadline} onChange={(event) => setField('application_deadline', event.target.value)} /></label>
+          <label>SPC database submission date<input type="datetime-local" value={form.department_submission_date} onChange={(event) => setField('department_submission_date', event.target.value)} /></label>
+          <label>Online assessment (OA)<input type="datetime-local" value={form.assessment_date} onChange={(event) => setField('assessment_date', event.target.value)} /></label>
+          <label>Group discussion (GD)<input type="datetime-local" value={form.group_discussion_date} onChange={(event) => setField('group_discussion_date', event.target.value)} /></label>
+        </div>
+        <div className="interview-date-editor"><div className="interview-date-heading"><strong>Interview dates and times</strong><button type="button" className="text-button" onClick={() => setField('interview_dates', [...form.interview_dates, ''])}><Plus size={15} /> Add date</button></div>
+          {form.interview_dates.map((slot, index) => <div className="interview-date-row" key={index}><label>Interview {index + 1} date<input type="date" value={slot.date} onChange={(event) => setField('interview_dates', form.interview_dates.map((current, row) => row === index ? { ...current, date: event.target.value } : current))} /></label><label>Time (optional)<input type="time" value={slot.time} onChange={(event) => setField('interview_dates', form.interview_dates.map((current, row) => row === index ? { ...current, time: event.target.value } : current))} /></label><button type="button" className="interview-date-remove" aria-label={`Remove interview ${index + 1}`} disabled={saving} onClick={() => setField('interview_dates', form.interview_dates.filter((_, row) => row !== index))}><X size={17} /></button></div>)}
+        </div>
+        <div className="modal-actions"><button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save details'}</button></div>
+      </form>
+    </section>
+  </div>
 }
 
 function CompanyCard({ company, index, isSpc, onToggle, onEdit, onDelete }) {
