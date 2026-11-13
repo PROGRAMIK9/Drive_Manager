@@ -3,7 +3,7 @@ import logging
 from cryptography.fernet import Fernet, InvalidToken
 from google.auth.transport.urllib3 import Request
 from google.oauth2 import id_token
-from google.auth.transport import urllib3
+import urllib3
 
 from app.config.config import gmail_settings
 
