@@ -73,6 +73,7 @@ async def _ensure_config(session):
         lists[key] = recipient_list
     legacy_lists = (await session.scalars(select(PlacementRecipientList).where(
         PlacementRecipientList.list_key.in_(["mca_considered", "mca_not_considered"]),
+        PlacementRecipientList.active.is_(True),
     ))).all()
     for legacy_list in legacy_lists:
         all_students = lists["all_students"]
