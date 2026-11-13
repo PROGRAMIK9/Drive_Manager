@@ -7,6 +7,7 @@ from .router.company import router as Company
 from .router.user import router as User
 from .router.placement_review import router as PlacementReview
 from .router.gmail_integration import router as GmailIntegration
+from .router.placement_campaigns import router as PlacementCampaigns
 from .config.config import app_settings
 from .service.mail_services import due_reminders_dependency
 from .service.gmail_automation import gmail_automation_loop
@@ -37,6 +38,7 @@ api.include_router(User)
 api.include_router(Company)
 api.include_router(PlacementReview)
 api.include_router(GmailIntegration)
+api.include_router(PlacementCampaigns)
 
 # Wrap the complete FastAPI app so CORS headers are also added to unhandled
 # server-error responses. This lets the browser surface the actual API error.

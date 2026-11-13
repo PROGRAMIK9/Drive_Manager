@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bell, BriefcaseBusiness, Building2, CalendarDays, CircleAlert, Download, Heart, LogOut, MapPin, Menu, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Sparkles, Trash2, Users, X, MailCheck } from 'lucide-react'
+import { Bell, BriefcaseBusiness, Building2, CalendarDays, CircleAlert, Download, Heart, LogOut, MapPin, Menu, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Sparkles, Trash2, Users, X, MailCheck, Send } from 'lucide-react'
 import CompanyForm from './CompanyForm'
 import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
+
+function readStoredUser() {
+  try { return JSON.parse(localStorage.getItem('drive-manager-user') || 'null') } catch { return null }
+}
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, {
@@ -26,7 +30,7 @@ async function request(path, options = {}) {
 
 function App() {
   const [token, setToken] = useState(null)
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('drive-manager-user') || 'null'))
+  const [user, setUser] = useState(readStoredUser)
   const [authMode, setAuthMode] = useState('login')
   const [companies, setCompanies] = useState([])
   const [search, setSearch] = useState('')
@@ -42,11 +46,16 @@ function App() {
   const [pendingOpportunities, setPendingOpportunities] = useState([])
   const [gmailStatus, setGmailStatus] = useState({ connected: false })
   const [gmailBusy, setGmailBusy] = useState(false)
+  const [senderStatus, setSenderStatus] = useState({ connected: false })
+  const [announcementConfig, setAnnouncementConfig] = useState(null)
+  const [campaigns, setCampaigns] = useState([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [installPrompt, setInstallPrompt] = useState(null)
-  const [selectedYear, setSelectedYear] = useState(() => Number(localStorage.getItem('drive-manager-year') || 2027))
+  const [selectedYear, setSelectedYear] = useState(() => {
+    try { return Number(localStorage.getItem('drive-manager-year') || 2027) } catch { return 2027 }
+  })
   const notificationRef = useRef(null)
 
   useEffect(() => {
@@ -119,6 +128,17 @@ function App() {
       refreshReview()
       const timer = window.setInterval(refreshReview, 30000)
       return () => window.clearInterval(timer)
+    }
+    if (activeView === 'announcements') {
+      Promise.all([
+        request('/api/admin/placement/announcements/config', { headers }),
+        request('/api/integrations/gmail/sender/status', { headers }),
+        request('/api/admin/placement/announcements/campaigns', { headers }),
+      ]).then(([config, sender, history]) => {
+        setAnnouncementConfig(config)
+        setSenderStatus(sender)
+        setCampaigns(history)
+      }).catch((e) => setError(e.message))
     }
   }, [token, user, activeView])
 
@@ -229,6 +249,20 @@ function App() {
     } catch (requestError) { setError(requestError.message) } finally { setGmailBusy(false) }
   }
 
+  async function connectSender() {
+    try {
+      const authorization = await request('/api/integrations/gmail/sender/connect', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      window.location.assign(authorization.authorization_url)
+    } catch (e) { setError(e.message) }
+  }
+
+  async function disconnectSender() {
+    try {
+      await request('/api/integrations/gmail/sender/disconnect', { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+      setSenderStatus({ connected: false })
+    } catch (e) { setError(e.message) }
+  }
+
   function openDuplicateMatch(match) {
     if (match.record_type === 'PENDING') {
       document.getElementById(`pending-opportunity-${match.record_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -253,6 +287,7 @@ function App() {
             <button className={`nav-item ${activeView === 'users' ? 'active' : ''}`} onClick={() => selectView('users')} title="Manage users"><Users size={18} /><span className="nav-label">Manage users</span></button>
             <button className={`nav-item ${activeView === 'interest' ? 'active' : ''}`} onClick={() => selectView('interest')} title="Drive interest"><Heart size={18} /><span className="nav-label">Drive interest</span></button>
             <button className={`nav-item ${activeView === 'email-review' ? 'active' : ''}`} onClick={() => selectView('email-review')} title="Email review"><MailCheck size={18} /><span className="nav-label">Email review</span></button>
+            <button className={`nav-item ${activeView === 'announcements' ? 'active' : ''}`} onClick={() => selectView('announcements')} title="Send announcements"><Send size={18} /><span className="nav-label">Send announcements</span></button>
           </>}
         </nav>
         <div className="sidebar-spacer" />
@@ -264,7 +299,7 @@ function App() {
         <header className="topbar"><div className="topbar-leading"><button className="nav-toggle" aria-label="Open navigation" title="Open navigation" onClick={() => { setSidebarOpen(true); setSidebarCollapsed(false) }}><Menu size={20} /></button><div className="eyebrow">{isSpc ? 'Coordinator workspace' : 'Your opportunity desk'}</div></div><div className="topbar-actions"><div className="notification-wrap" ref={notificationRef}><button className={`icon-button notification-button ${notificationsOpen ? 'selected' : ''}`} title="Saved opportunities and upcoming dates" aria-label={`Notifications${upcomingCount ? `, ${upcomingCount} upcoming` : ''}`} aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen((open) => !open)}><Bell size={19} />{upcomingCount > 0 && <span className="notification-badge">{upcomingCount}</span>}</button>{notificationsOpen && <section className="notification-panel" aria-label="Saved opportunities"><div className="notification-panel-header"><div><span className="section-kicker">Your board</span><h2>Saved opportunities</h2></div><button className="notification-close" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications"><X size={17} /></button></div>{savedOpportunities.length ? <div className="notification-list">{savedOpportunities.map((company) => <article className="notification-item" key={company.id}><span className="notification-mark"><CalendarDays size={16} /></span><div><strong>{company.name}</strong><span>{company.location}</span><small>{new Date(company.date).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</small></div></article>)}</div> : <p className="notification-empty">Save an opportunity with the heart button and its date will show up here.</p>}</section>}</div></div></header>
         {error && <div className="error-banner"><CircleAlert size={18} />{error}<button onClick={() => setError('')}><X size={16} /></button></div>}
         {statusMessage && <div className="notice-banner" role="status"><MailCheck size={18} />{statusMessage}<button aria-label="Dismiss message" onClick={() => setStatusMessage('')}><X size={16} /></button></div>}
-        {activeView === 'email-review' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools · Gmail integration</span><h2>Placement email review</h2></div></section><article className="interest-panel gmail-settings"><div><strong>{gmailStatus.connected ? (gmailStatus.watch_expiration ? "Gmail connected · watch active" : "Gmail connected · starting watch") : "Gmail not connected"}</strong><span>{gmailStatus.email_address || "Mailbox: maaryamannp.mca25@rvce.edu.in"}</span><small>Last sync: {gmailStatus.last_sync_at ? new Date(gmailStatus.last_sync_at).toLocaleString() : "Pending first sync"} · Watch expires: {gmailStatus.watch_expiration ? new Date(gmailStatus.watch_expiration).toLocaleString() : "Starting automatically"}</small>{gmailStatus.last_error && <small className="review-warning">{gmailStatus.last_error}</small>}</div><div className="review-actions">{!gmailStatus.connected ? <button className="primary-button" disabled={gmailBusy} onClick={() => runGmailAction("connect")}>Connect Gmail</button> : <><button className="secondary-button" disabled={gmailBusy} onClick={() => runGmailAction("watch")}>Start / renew watch</button><button className="secondary-button" disabled={gmailBusy} onClick={() => runGmailAction("sync")}>Sync mailbox</button><button className="secondary-button" disabled={gmailBusy} onClick={() => runGmailAction("disconnect")}>Disconnect</button></>}</div></article><p className="review-intro">New inbox messages are checked automatically. Emails from @rvce.edu.in are classified and placement details are sent here for SPC review; nothing is published to students until an SPC approves it.</p>{pendingOpportunities.length ? <div className="interest-list">{pendingOpportunities.map((item) => <ReviewOpportunity key={item.id} item={item} token={token} onUpdate={(updated) => setPendingOpportunities((items) => items.map((current) => current.id === updated.id ? updated : current))} onError={(message) => setError(message)} onOpenMatch={openDuplicateMatch} />)}</div> : <div className="empty-state"><MailCheck size={30} /><strong>No pending opportunities</strong><span>New review items will be listed here.</span></div>}</> : activeView === 'users' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools</span><h2>People on Driveboard</h2></div></section><div className="management-list">{users.map((person) => <article className="management-row" key={person.id}><div className="user-avatar">{person.name.slice(0, 1).toUpperCase()}</div><div className="management-details"><strong>{person.name}</strong><span>{person.email}</span></div><span className={`role-badge ${person.role.toLowerCase()}`}>{person.role}</span><select aria-label={`Role for ${person.name}`} value={person.role} onChange={(event) => changeRole(person, event.target.value)}><option value="STUDENT">Student</option><option value="SPC">SPC coordinator</option></select><select aria-label={`Year of passing for ${person.name}`} value={person.year_of_passing || ''} onChange={(event) => changeUserYear(person, event.target.value)}><option value="">Unassigned</option><option value="2027">2027</option><option value="2028">2028</option></select></article>)}</div></> : activeView === 'interest' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools</span><h2>Interest by drive</h2></div></section><div className="interest-list">{interestSummary.map((drive) => <article className="interest-panel" key={drive.company_id}><div className="interest-heading"><div><span className="process-tag">{drive.process.replace('_', ' ')}</span><h3>{drive.company_name}</h3><span className="company-meta">{drive.location} · {new Date(drive.date).toLocaleDateString()}</span></div><span className="interest-count">{drive.interested_users.length} interested</span></div>{drive.interested_users.length ? <div className="interested-people">{drive.interested_users.map((person) => <span className="person-chip" key={person.id}>{person.name} <small>{person.email}</small></span>)}</div> : <p className="no-interest">No students have marked interest yet.</p>}</article>)}</div></> : <><section className="section-heading"><div><span className="section-kicker">Explore the board</span><h2>Open opportunities</h2></div>{isSpc && <button className="primary-button" onClick={() => { setEditingCompany(null); setShowForm(true) }}><Plus size={17} /> Add company</button>}</section></>}
+        {activeView === 'announcements' && isSpc ? <AnnouncementWorkspace token={token} config={announcementConfig} setConfig={setAnnouncementConfig} sender={senderStatus} onConnectSender={connectSender} onDisconnectSender={disconnectSender} campaigns={campaigns} setCampaigns={setCampaigns} companies={companies} onError={setError} onStatus={setStatusMessage} /> : activeView === 'email-review' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools · Gmail integration</span><h2>Placement email review</h2></div></section><article className="interest-panel gmail-settings"><div><strong>{gmailStatus.connected ? (gmailStatus.watch_expiration ? "Gmail connected · watch active" : "Gmail connected · starting watch") : "Gmail not connected"}</strong><span>{gmailStatus.email_address || "Mailbox: maaryamannp.mca25@rvce.edu.in"}</span><small>Last sync: {gmailStatus.last_sync_at ? new Date(gmailStatus.last_sync_at).toLocaleString() : "Pending first sync"} · Watch expires: {gmailStatus.watch_expiration ? new Date(gmailStatus.watch_expiration).toLocaleString() : "Starting automatically"}</small>{gmailStatus.last_error && <small className="review-warning">{gmailStatus.last_error}</small>}</div><div className="review-actions">{!gmailStatus.connected ? <button className="primary-button" disabled={gmailBusy} onClick={() => runGmailAction("connect")}>Connect Gmail</button> : <><button className="secondary-button" disabled={gmailBusy} onClick={() => runGmailAction("watch")}>Start / renew watch</button><button className="secondary-button" disabled={gmailBusy} onClick={() => runGmailAction("sync")}>Sync mailbox</button><button className="secondary-button" disabled={gmailBusy} onClick={() => runGmailAction("disconnect")}>Disconnect</button></>}</div></article><p className="review-intro">New inbox messages are checked automatically. Emails from @rvce.edu.in are classified and placement details are sent here for SPC review; nothing is published to students until an SPC approves it.</p>{pendingOpportunities.length ? <div className="interest-list">{pendingOpportunities.map((item) => <ReviewOpportunity key={item.id} item={item} token={token} onUpdate={(updated) => setPendingOpportunities((items) => items.map((current) => current.id === updated.id ? updated : current))} onError={(message) => setError(message)} onOpenMatch={openDuplicateMatch} />)}</div> : <div className="empty-state"><MailCheck size={30} /><strong>No pending opportunities</strong><span>New review items will be listed here.</span></div>}</> : activeView === 'users' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools</span><h2>People on Driveboard</h2></div></section><div className="management-list">{users.map((person) => <article className="management-row" key={person.id}><div className="user-avatar">{person.name.slice(0, 1).toUpperCase()}</div><div className="management-details"><strong>{person.name}</strong><span>{person.email}</span></div><span className={`role-badge ${person.role.toLowerCase()}`}>{person.role}</span><select aria-label={`Role for ${person.name}`} value={person.role} onChange={(event) => changeRole(person, event.target.value)}><option value="STUDENT">Student</option><option value="SPC">SPC coordinator</option></select><select aria-label={`Year of passing for ${person.name}`} value={person.year_of_passing || ''} onChange={(event) => changeUserYear(person, event.target.value)}><option value="">Unassigned</option><option value="2027">2027</option><option value="2028">2028</option></select></article>)}</div></> : activeView === 'interest' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools</span><h2>Interest by drive</h2></div></section><div className="interest-list">{interestSummary.map((drive) => <article className="interest-panel" key={drive.company_id}><div className="interest-heading"><div><span className="process-tag">{drive.process.replace('_', ' ')}</span><h3>{drive.company_name}</h3><span className="company-meta">{drive.location} · {new Date(drive.date).toLocaleDateString()}</span></div><span className="interest-count">{drive.interested_users.length} interested</span></div>{drive.interested_users.length ? <div className="interested-people">{drive.interested_users.map((person) => <span className="person-chip" key={person.id}>{person.name} <small>{person.email}</small></span>)}</div> : <p className="no-interest">No students have marked interest yet.</p>}</article>)}</div></> : <><section className="section-heading"><div><span className="section-kicker">Explore the board</span><h2>Open opportunities</h2></div>{isSpc && <button className="primary-button" onClick={() => { setEditingCompany(null); setShowForm(true) }}><Plus size={17} /> Add company</button>}</section></>}
         <div className="toolbar">{!isSpc && <label className="year-picker">Year of passing<select value={selectedYear} onChange={(event) => { const year = Number(event.target.value); setSelectedYear(year); localStorage.setItem('drive-manager-year', String(year)) }}><option value={2027}>2027</option><option value={2028}>2028</option></select></label>}<label className="search-field"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search company, place or process" /></label><div className="filter-pills">{['All opportunities', 'online_assesment', 'interview', 'ppt', 'group_discussion', 'pen_paper_test', 'technical_assessment', ...(isSpc ? ['send_mail'] : [])].map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter.replaceAll('_', ' ')}</button>)}</div></div>
         {activeView !== 'email-review' && (loading ? <div className="empty-state"><div className="spinner" />Loading opportunities...</div> : visibleCompanies.length ? <div className="company-grid">{visibleCompanies.map((company, index) => <CompanyCard key={company.id} company={company} index={index} isSpc={isSpc} onToggle={toggleInterest} onEdit={(selected) => { setEditingCompany(selected); setShowForm(true) }} onDelete={deleteCompany} />)}</div> : <div className="empty-state"><Building2 size={30} /><strong>No opportunities yet</strong><span>Try another search or check back later.</span></div>)}
         <footer className="footer"><span>Driveboard · Built for thoughtful next steps</span><span>Student placement workspace</span></footer>
@@ -342,6 +377,126 @@ function AuthScreen({ onAuthenticated }) {
     } catch (requestError) { setError(requestError.message) } finally { setBusy(false) }
   }
   return <div className="auth-shell"><div className="auth-aside"><div className="brand"><span className="brand-mark"><Sparkles size={16} /></span><span>Drive<span className="brand-light">board</span></span></div><div className="auth-quote"><span className="quote-mark">“</span><h1>Small steps.<br /><em>Good direction.</em></h1><p>A calmer way to find the companies and opportunities that fit your next chapter.</p></div><div className="aside-footer"><span>01 / 03</span><span>Student opportunity desk</span></div></div><main className="auth-main"><div className="auth-form-wrap"><span className="section-kicker">Welcome</span><h2>Sign in to your board</h2><p className="form-intro">Use your verified RVCE Google account.</p>{error && <div className="error-banner"><CircleAlert size={17} />{error}</div>}<div className="google-login-wrap">{busy ? <div className="empty-state"><div className="spinner" />Signing in...</div> : <><div ref={buttonContainer} className="google-signin-host" />{!googleReady && <span className="google-signin-placeholder">Loading Google sign-in…</span>}</>}</div></div></main></div>
+}
+
+function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSender, onDisconnectSender, campaigns, setCampaigns, companies, onError, onStatus }) {
+  const headers = { Authorization: `Bearer ${token}` }
+  const [listKey, setListKey] = useState('mca_considered')
+  const [recipientText, setRecipientText] = useState('')
+  const [companyId, setCompanyId] = useState('')
+  const [templateKey, setTemplateKey] = useState('mca_considered')
+  const [consentUrl, setConsentUrl] = useState('')
+  const [extraLinks, setExtraLinks] = useState('')
+  const [toText, setToText] = useState('')
+  const [ccText, setCcText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [files, setFiles] = useState([])
+  const [recipients, setRecipients] = useState([])
+  const [signature, setSignature] = useState('')
+  const [draft, setDraft] = useState(null)
+  const lists = config?.recipient_lists || []
+  const selectedList = lists.find((item) => item.list_key === listKey)
+  const selectedCompany = companies.find((item) => String(item.id) === String(companyId))
+  const templates = config?.templates || {}
+  const currentTemplate = templates[templateKey] || {}
+  const [subject, setSubject] = useState('')
+  const [body, setBody] = useState('')
+
+  useEffect(() => {
+    if (!selectedList) return
+    request(`/api/admin/placement/announcements/lists/${selectedList.id}/recipients`, { headers })
+      .then(setRecipients).catch((e) => onError(e.message))
+  }, [selectedList?.id])
+  useEffect(() => {
+    if (sender.signature_text !== undefined) setSignature(sender.signature_text)
+  }, [sender.signature_text])
+  useEffect(() => {
+    if (selectedCompany && currentTemplate.subject) {
+      setSubject(currentTemplate.subject.replaceAll('{company_name}', selectedCompany.name).replaceAll('{role}', selectedCompany.process.replaceAll('_', ' ')))
+      setBody(currentTemplate.body.replaceAll('{company_name}', selectedCompany.name).replaceAll('{role}', selectedCompany.process.replaceAll('_', ' ')))
+    }
+  }, [companyId, templateKey, config?.templates, selectedCompany?.name, selectedCompany?.process, currentTemplate.body, currentTemplate.subject])
+
+  function splitEmails(value) { return value.split(/[\s,;]+/).map((email) => email.trim()).filter(Boolean) }
+  async function saveConfig() {
+    setBusy(true)
+    try {
+      const updated = await request('/api/admin/placement/announcements/config', { method: 'PUT', headers, body: JSON.stringify({
+        placement_director_email: config.placement_director_email || null,
+        co_spc_emails: config.co_spc_emails || [],
+        staff_coordinator_email: config.staff_coordinator_email || null,
+        templates,
+      }) })
+      setConfig(updated)
+      onStatus('Announcement recipients and templates saved.')
+    } catch (e) { onError(e.message) } finally { setBusy(false) }
+  }
+  async function importRecipients() {
+    if (!selectedList || !recipientText.trim()) return
+    setBusy(true)
+    try {
+      const result = await request(`/api/admin/placement/announcements/lists/${selectedList.id}/import`, { method: 'POST', headers, body: JSON.stringify({ content: recipientText }) })
+      setRecipientText('')
+      const updated = await request(`/api/admin/placement/announcements/lists/${selectedList.id}/recipients`, { headers })
+      setRecipients(updated)
+      const config = await request('/api/admin/placement/announcements/config', { headers }); setConfig(config)
+      onStatus(`Recipient list updated: ${result.added} added, ${result.reactivated} reactivated, ${result.duplicates_removed} duplicates skipped.`)
+    } catch (e) { onError(e.message) } finally { setBusy(false) }
+  }
+  async function saveSignature() {
+    try {
+      await request('/api/integrations/gmail/sender/signature', { method: 'PUT', headers, body: JSON.stringify({ signature_text: signature }) })
+      onStatus('Your sender signature was saved.')
+    } catch (e) { onError(e.message) }
+  }
+  async function uploadFiles(event) {
+    const chosen = [...event.target.files]
+    for (const file of chosen) {
+      const form = new FormData(); form.append('file', file)
+      try { const saved = await request('/api/admin/placement/announcements/files', { method: 'POST', headers, body: form }); setFiles((current) => [...current, { kind: 'upload', file_id: saved.id, filename: saved.filename }]) }
+      catch (e) { onError(e.message) }
+    }
+    event.target.value = ''
+  }
+  async function createDraft() {
+    if (!selectedCompany || !selectedList || !consentUrl.trim()) { onError('Choose a published opportunity, recipient list, and Google Form consent link.'); return }
+    setBusy(true)
+    try {
+      const parsedLinks = extraLinks.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => { const [label, url] = line.split('|').map((part) => part.trim()); return { label: label || 'More information', url: url || label } })
+      const created = await request('/api/admin/placement/announcements/campaigns', { method: 'POST', headers, body: JSON.stringify({
+        company_id: selectedCompany.id, recipient_list_id: selectedList.id, template_key: templateKey, consent_form_url: consentUrl,
+        subject, body, include_signature: true, to_emails: toText.trim() ? splitEmails(toText) : undefined, cc_emails: ccText.trim() ? splitEmails(ccText) : undefined,
+        links: parsedLinks, attachments: files, request_key: crypto.randomUUID(),
+      }) })
+      setDraft(created)
+      setCampaigns((current) => [created, ...current.filter((item) => item.id !== created.id)])
+      onStatus('Draft saved. Review the recipients and message preview before sending.')
+    } catch (e) { onError(e.message) } finally { setBusy(false) }
+  }
+  async function sendDraft() {
+    if (!draft) return
+    if (!window.confirm(`Send this announcement to ${draft.bcc_count} students using ${draft.sender_email}?`)) return
+    setBusy(true)
+    try {
+      const sent = await request(`/api/admin/placement/announcements/campaigns/${draft.id}/send`, { method: 'POST', headers, body: JSON.stringify({ request_key: draft.request_key }) })
+      setDraft(sent); setCampaigns((current) => [sent, ...current.filter((item) => item.id !== sent.id)])
+      onStatus(`Announcement sending finished: ${sent.status}.`)
+    } catch (e) { onError(e.message) } finally { setBusy(false) }
+  }
+  return <>
+    <section className="section-heading"><div><span className="section-kicker">SPC tools · student announcements</span><h2>Send placement announcements</h2></div></section>
+    <article className="interest-panel announcement-panel"><div><strong>{sender.connected ? `Sending account connected · ${sender.email_address}` : 'Connect your own sending account'}</strong><span>This account sends announcements. The separate placement inbox stays connected for email review.</span></div>{sender.connected ? <button className="secondary-button" onClick={onDisconnectSender}>Disconnect sender</button> : <button className="primary-button" onClick={onConnectSender}>Connect Gmail sender</button>}</article>
+    {sender.connected && <>
+      <article className="interest-panel announcement-panel"><div className="announcement-form"><h3>Automatic signature</h3><p>Gmail API sends do not append the signature from Gmail’s web compose settings. Add the text here; it appears in the preview and message.</p><textarea value={signature} onChange={(e) => setSignature(e.target.value)} placeholder={'Regards,\nYour name\nStudent Placement Coordinator'} rows={4} /></div><button className="secondary-button" onClick={saveSignature}>Save signature</button></article>
+      <div className="announcement-grid">
+        <article className="interest-panel announcement-form"><h3>Recipients and templates</h3><label>Placement director email<input value={config?.placement_director_email || ''} onChange={(e) => setConfig({ ...config, placement_director_email: e.target.value })} placeholder="director-mca@rvce.edu.in" /></label><label>CC emails<input value={(config?.co_spc_emails || []).join(', ')} onChange={(e) => setConfig({ ...config, co_spc_emails: splitEmails(e.target.value) })} placeholder="Co-SPC addresses, comma separated" /></label><label>Staff coordinator email<input value={config?.staff_coordinator_email || ''} onChange={(e) => setConfig({ ...config, staff_coordinator_email: e.target.value })} placeholder="Coordinator address" /></label><label>Template<select value={templateKey} onChange={(e) => setTemplateKey(e.target.value)}><option value="mca_considered">MCA considered</option><option value="mca_not_considered">MCA not considered</option></select></label><label>Subject<input value={currentTemplate.subject || ''} onChange={(e) => setConfig({ ...config, templates: { ...templates, [templateKey]: { ...currentTemplate, subject: e.target.value } } })} /></label><label>Template body<textarea rows={5} value={currentTemplate.body || ''} onChange={(e) => setConfig({ ...config, templates: { ...templates, [templateKey]: { ...currentTemplate, body: e.target.value } } })} /></label><button className="secondary-button" disabled={busy} onClick={saveConfig}>Save recipients and templates</button></article>
+        <article className="interest-panel announcement-form"><h3>Student list</h3><label>List<select value={listKey} onChange={(e) => setListKey(e.target.value)}>{lists.map((item) => <option key={item.id} value={item.list_key}>{item.name} · {item.active_count} active</option>)}</select></label><p>Paste or upload a CSV or copied email table. Addresses stay in this database and can be edited by importing an updated list later.</p><textarea rows={7} value={recipientText} onChange={(e) => setRecipientText(e.target.value)} placeholder="Paste student email addresses here" /><button className="secondary-button" disabled={busy || !recipientText.trim()} onClick={importRecipients}>Import addresses</button><div className="recipient-preview">{recipients.filter((item) => item.active).length} active addresses</div></article>
+      </div>
+      <article className="interest-panel announcement-form campaign-form"><h3>Compose announcement</h3><div className="form-columns"><label>Published opportunity<select value={companyId} onChange={(e) => setCompanyId(e.target.value)}><option value="">Choose company</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name} · {company.process.replaceAll('_', ' ')}</option>)}</select></label><label>Distribution list<select value={listKey} onChange={(e) => setListKey(e.target.value)}>{lists.map((item) => <option key={item.id} value={item.list_key}>{item.name} · {item.active_count} active</option>)}</select></label><label>Consent Google Form URL<input value={consentUrl} onChange={(e) => setConsentUrl(e.target.value)} placeholder="https://docs.google.com/forms/..." /></label><label>To<input value={toText || config?.placement_director_email || ''} onChange={(e) => setToText(e.target.value)} /></label><label>CC<input value={ccText || [...(config?.co_spc_emails || []), config?.staff_coordinator_email].filter(Boolean).join(', ')} onChange={(e) => setCcText(e.target.value)} /></label><label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label></div><label>Message<textarea rows={7} value={body} onChange={(e) => setBody(e.target.value)} /></label><label>Additional links <small>One per line: Label | https://…</small><textarea rows={3} value={extraLinks} onChange={(e) => setExtraLinks(e.target.value)} placeholder="Job description | https://…" /></label><label>Attachments (PDF, DOC, DOCX, XLSX; up to 8 MB each)<input type="file" accept=".pdf,.doc,.docx,.xlsx" multiple onChange={uploadFiles} /></label>{files.map((file, index) => <div className="file-chip" key={`${file.filename}-${index}`}>{file.filename}<button onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}>Remove</button></div>)}<div className="review-actions"><button className="primary-button" disabled={busy} onClick={createDraft}>Save draft and preview</button>{draft && <button className="primary-button" disabled={busy || draft.status !== 'DRAFT'} onClick={sendDraft}>Send announcement</button>}</div>
+      {draft && <div className="campaign-preview"><span className="section-kicker">Preview · {draft.status}</span><h3>{draft.subject}</h3><p>From: {draft.sender_email} · To: {draft.to_emails.join(', ')} · CC: {draft.cc_emails.join(', ') || 'None'} · BCC: {draft.bcc_count} students</p><pre>{draft.body}{draft.include_signature && draft.signature_text ? `\n\n${draft.signature_text}` : ''}\n\nConsent form: {draft.consent_form_url}</pre><p>Attachments: {draft.attachment_names.join(', ') || 'None'}</p></div>}</article>
+      <section className="interest-list"><h3>Campaign history</h3>{campaigns.map((campaign) => <article className="interest-panel campaign-row" key={campaign.id}><div><strong>{campaign.subject}</strong><span>{campaign.status} · {campaign.sender_email} · {campaign.bcc_count} BCC recipients</span><small>{new Date(campaign.created_at).toLocaleString()}</small>{campaign.error_details && <small className="review-warning">{campaign.error_details}</small>}</div></article>)}</section>
+    </>}
+  </>
 }
 
 function ReviewOpportunity({ item, token, onUpdate, onError, onOpenMatch }) {

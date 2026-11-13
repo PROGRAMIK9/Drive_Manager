@@ -103,11 +103,12 @@ async def serialize_opportunity(
         **{
             key: getattr(item, key)
             for key in PendingOpportunityRead.model_fields
-            if key not in {"source_subject", "source_sender", "source_link", "possible_duplicates"}
+            if key not in {"source_subject", "source_sender", "source_link", "source_attachments", "possible_duplicates"}
         },
         source_subject=source.subject if source else None,
         source_sender=source.sender if source else None,
         source_link=source.source_link if source else None,
+        source_attachments=(source.extracted_data or {}).get("attachments", []) if source else [],
         possible_duplicates=duplicates,
     )
 

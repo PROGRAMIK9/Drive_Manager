@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Literal
-from pydantic import EmailStr
+from pydantic import EmailStr, HttpUrl
 from sqlmodel import SQLModel, Field
 from pydantic import field_validator
 
@@ -84,6 +84,13 @@ class PossibleDuplicate(SQLModel):
     event_date: datetime
 
 
+class EmailAttachmentRead(SQLModel):
+    filename: str
+    mime_type: str
+    attachment_id: str
+    size: int = 0
+
+
 class PendingOpportunityRead(SQLModel):
     id: int
     company_name: str
@@ -114,6 +121,7 @@ class PendingOpportunityRead(SQLModel):
     source_subject: str | None = None
     source_sender: str | None = None
     source_link: str | None = None
+    source_attachments: list[EmailAttachmentRead] = Field(default_factory=list)
     review_status: str
     rejection_reason: str | None = None
     published_company_id: int | None = None
@@ -153,3 +161,63 @@ class GmailStatusRead(SQLModel):
     last_sync_at: datetime | None = None
     watch_expiration: datetime | None = None
     last_error: str | None = None
+
+
+class GmailSenderStatusRead(SQLModel):
+    connected: bool
+    email_address: EmailStr | None = None
+    signature_text: str = ""
+
+
+class GmailSenderSignatureUpdate(SQLModel):
+    signature_text: str = Field(max_length=5000)
+
+
+class AnnouncementSettingsUpdate(SQLModel):
+    placement_director_email: EmailStr | None = None
+    co_spc_emails: list[EmailStr] = Field(default_factory=list)
+    staff_coordinator_email: EmailStr | None = None
+    templates: dict[str, dict[str, str]]
+
+
+class RecipientListCreate(SQLModel):
+    name: str
+    list_key: str
+
+
+class RecipientImport(SQLModel):
+    content: str
+    replace_existing: bool = False
+
+
+class CampaignLink(SQLModel):
+    label: str
+    url: HttpUrl
+
+
+class CampaignAttachmentInput(SQLModel):
+    kind: Literal["upload", "inbox"]
+    filename: str
+    file_id: int | None = None
+    source_email_id: int | None = None
+    gmail_message_id: str | None = None
+    attachment_id: str | None = None
+
+
+class CampaignDraftInput(SQLModel):
+    company_id: int
+    recipient_list_id: int
+    template_key: Literal["mca_considered", "mca_not_considered"]
+    consent_form_url: HttpUrl
+    subject: str
+    body: str
+    include_signature: bool = True
+    to_emails: list[EmailStr] | None = None
+    cc_emails: list[EmailStr] | None = None
+    links: list[CampaignLink] = Field(default_factory=list)
+    attachments: list[CampaignAttachmentInput] = Field(default_factory=list)
+    request_key: str
+
+
+class CampaignSendRequest(SQLModel):
+    request_key: str

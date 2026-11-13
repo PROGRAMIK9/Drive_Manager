@@ -131,9 +131,14 @@ def _decode_part(data: str) -> str:
 def parse_gmail_message(message: dict) -> dict:
     headers = {str(h.get("name", "")).casefold(): str(h.get("value", "")) for h in message.get("payload", {}).get("headers", [])}
     parts: list[tuple[str, str]] = []
+    attachments: list[dict[str, str | int]] = []
     def visit(part: dict) -> None:
         mime = str(part.get("mimeType", "")).casefold()
         body = part.get("body", {})
+        filename = str(part.get("filename", "")).strip()
+        attachment_id = body.get("attachmentId")
+        if filename and attachment_id:
+            attachments.append({"filename": filename[:255], "mime_type": mime[:120] or "application/octet-stream", "attachment_id": str(attachment_id), "size": int(body.get("size") or 0)})
         if body.get("data") and mime in {"text/plain", "text/html"}:
             parts.append((mime, _decode_part(body["data"])))
         for child in part.get("parts", []):
@@ -158,6 +163,7 @@ def parse_gmail_message(message: dict) -> dict:
         "subject": headers.get("subject", ""),
         "received_at": received,
         "body": body,
+        "attachments": attachments,
         "content_hash": digest,
         "accepted_sender": is_accepted_placement_sender(sender),
         "source_link": f"https://mail.google.com/mail/u/0/#all/{message.get('id', '')}",
@@ -175,6 +181,21 @@ async def fetch_message(access_token: str, message_id: str) -> dict:
     return parse_gmail_message(response.json())
 
 
+async def fetch_message_attachment(access_token: str, message_id: str, attachment_id: str) -> bytes:
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(
+            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/attachments/{attachment_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if response.is_error:
+        raise HTTPException(status_code=502, detail="Could not retrieve the selected inbox attachment")
+    try:
+        data = str(response.json().get("data", ""))
+        return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail="Gmail returned an invalid attachment") from exc
+
+
 async def store_fetched_message(session: AsyncSession, message_data: dict) -> ProcessedEmail:
     existing = await session.scalar(select(ProcessedEmail).where(ProcessedEmail.gmail_message_id == message_data["gmail_message_id"]))
     if existing:
@@ -189,7 +210,7 @@ async def store_fetched_message(session: AsyncSession, message_data: dict) -> Pr
         classification="UNCERTAIN",
         processing_status="RECEIVED" if accepted else "IGNORED_SENDER",
         processing_error=None,
-        extracted_data={"body": message_data.get("body", "")} if accepted else {},
+        extracted_data={"body": message_data.get("body", ""), "attachments": message_data.get("attachments", [])} if accepted else {},
         source_link=message_data.get("source_link"),
         content_hash=message_data.get("content_hash"),
     )

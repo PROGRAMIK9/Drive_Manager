@@ -86,6 +86,82 @@ class GmailOAuthState(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     state_hash: str = Field(unique=True, index=True, max_length=64)
     user_id: int = Field(foreign_key="user.id", index=True)
+    purpose: str = Field(default="inbox", max_length=24)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_type=sa.DateTime(timezone=True), nullable=False)
+
+
+class GmailSendingAccount(SQLModel, table=True):
+    """A sender mailbox owned by exactly one authenticated SPC user."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", unique=True, index=True)
+    email_address: str = Field(index=True, max_length=320)
+    encrypted_refresh_token: str
+    signature_text: str = Field(default="", sa_column=Column(sa.Text(), nullable=False, server_default=""))
+    connected: bool = Field(default=True, nullable=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_type=sa.DateTime(timezone=True), nullable=False)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_type=sa.DateTime(timezone=True), nullable=False)
+
+
+class PlacementRecipientList(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(max_length=160)
+    list_key: str = Field(unique=True, max_length=40)
+    active: bool = Field(default=True, nullable=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_type=sa.DateTime(timezone=True), nullable=False)
+
+
+class PlacementRecipient(SQLModel, table=True):
+    __table_args__ = (sa.UniqueConstraint("recipient_list_id", "email", name="uq_placement_recipient_list_email"),)
+    id: int | None = Field(default=None, primary_key=True)
+    recipient_list_id: int = Field(foreign_key="placementrecipientlist.id", index=True)
+    email: str = Field(index=True, max_length=320)
+    name: str | None = Field(default=None, max_length=160)
+    active: bool = Field(default=True, nullable=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_type=sa.DateTime(timezone=True), nullable=False)
+
+
+class PlacementAnnouncementSettings(SQLModel, table=True):
+    id: int = Field(default=1, primary_key=True)
+    placement_director_email: str | None = Field(default=None, max_length=320)
+    co_spc_emails: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
+    staff_coordinator_email: str | None = Field(default=None, max_length=320)
+    templates: dict[str, Any] = Field(default_factory=dict, sa_column=Column(sa.JSON, nullable=False))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_type=sa.DateTime(timezone=True), nullable=False)
+
+
+class PlacementCampaign(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    company_id: int = Field(foreign_key="company.id", index=True)
+    recipient_list_id: int = Field(foreign_key="placementrecipientlist.id", index=True)
+    initiated_by: int = Field(foreign_key="user.id", index=True)
+    sender_email: str = Field(max_length=320)
+    template_key: str = Field(max_length=40)
+    subject: str
+    body: str
+    signature_text: str = Field(default="", sa_column=Column(sa.Text(), nullable=False, server_default=""))
+    include_signature: bool = Field(default=True, sa_column=Column(sa.Boolean(), nullable=False, server_default=sa.true()))
+    to_emails: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
+    cc_emails: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
+    bcc_count: int = Field(default=0, nullable=False)
+    consent_form_url: str = Field(max_length=2000)
+    links: list[dict[str, str]] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
+    attachments: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
+    attachment_names: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
+    gmail_message_ids: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
+    status: str = Field(default="DRAFT", max_length=24, index=True)
+    error_details: str | None = Field(default=None)
+    request_key: str = Field(unique=True, index=True, max_length=64)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_type=sa.DateTime(timezone=True), nullable=False)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_type=sa.DateTime(timezone=True), nullable=False)
+    sent_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
+
+
+class PlacementAttachment(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    uploaded_by: int = Field(foreign_key="user.id", index=True)
+    filename: str = Field(max_length=255)
+    content_type: str = Field(max_length=120)
+    content: bytes = Field(sa_column=Column(sa.LargeBinary, nullable=False))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_type=sa.DateTime(timezone=True), nullable=False)
 
 

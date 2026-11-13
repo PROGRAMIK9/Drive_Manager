@@ -13,8 +13,8 @@ from sqlalchemy import delete, select
 
 from app.config.config import app_settings, gmail_settings
 from app.database.database import SessionDep
-from app.schema.database import GmailIntegration, GmailOAuthState, Role, User
-from app.schema.models import GmailStatusRead
+from app.schema.database import GmailIntegration, GmailOAuthState, GmailSendingAccount, Role, User
+from app.schema.models import GmailSenderSignatureUpdate, GmailSenderStatusRead, GmailStatusRead
 from app.service.gmail_security import GmailCredentialError, decrypt_refresh_token, encrypt_refresh_token, verify_pubsub_bearer
 from app.service.gmail_automation import (
     enqueue_gmail_notification,
@@ -26,6 +26,7 @@ from app.service.user_services import CurrentUserDep
 router = APIRouter(tags=["Gmail integration"])
 logger = logging.getLogger(__name__)
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 
@@ -51,13 +52,37 @@ async def connect_gmail(session: SessionDep, user: CurrentUserDep):
     await session.execute(delete(GmailOAuthState).where(GmailOAuthState.created_at < datetime.now(timezone.utc) - timedelta(minutes=15)))
     session.add(GmailOAuthState(state_hash=state_hash, user_id=user.id))
     await session.commit()
-    logger.warning("Gmail OAuth state saved user_id=%s state_hash_prefix=%s", user.id, state_hash[:10])
     from urllib.parse import urlencode
     params = urlencode({
         "client_id": gmail_settings.GOOGLE_OAUTH_CLIENT_ID,
         "redirect_uri": gmail_settings.GOOGLE_REDIRECT_URI,
         "response_type": "code",
         "scope": f"openid email {GMAIL_SCOPE}",
+        "access_type": "offline",
+        "prompt": "consent",
+        "include_granted_scopes": "true",
+        "state": state,
+    })
+    return {"authorization_url": f"https://accounts.google.com/o/oauth2/v2/auth?{params}"}
+
+
+@router.post("/api/integrations/gmail/sender/connect")
+async def connect_gmail_sender(session: SessionDep, user: CurrentUserDep):
+    _require_spc(user)
+    _require_oauth_configuration()
+    if not gmail_settings.TOKEN_ENCRYPTION_KEY:
+        raise HTTPException(status_code=503, detail="Gmail token encryption is not configured")
+    state = secrets.token_urlsafe(32)
+    state_hash = hashlib.sha256(state.encode()).hexdigest()
+    await session.execute(delete(GmailOAuthState).where(GmailOAuthState.created_at < datetime.now(timezone.utc) - timedelta(minutes=15)))
+    session.add(GmailOAuthState(state_hash=state_hash, user_id=user.id, purpose="sender"))
+    await session.commit()
+    from urllib.parse import urlencode
+    params = urlencode({
+        "client_id": gmail_settings.GOOGLE_OAUTH_CLIENT_ID,
+        "redirect_uri": gmail_settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": f"openid email {GMAIL_SEND_SCOPE}",
         "access_type": "offline",
         "prompt": "consent",
         "include_granted_scopes": "true",
@@ -101,6 +126,7 @@ async def gmail_callback(
         await session.delete(stored_state)
         await session.commit()
         raise HTTPException(status_code=403, detail="SPC authorization expired; start Gmail connection again")
+    purpose = stored_state.purpose
     if not gmail_settings.TOKEN_ENCRYPTION_KEY:
         logger.error("Gmail OAuth callback cannot continue: token encryption key is not configured")
         await session.delete(stored_state)
@@ -134,26 +160,39 @@ async def gmail_callback(
 
     expected = gmail_settings.SPCS_GMAIL_ADDRESS.strip().casefold()
     connected = str(account.get("email", "")).strip().casefold()
-    if not account.get("email_verified") or connected != expected:
+    required_account = state_user.email.casefold() if purpose == "sender" else expected
+    if not account.get("email_verified") or connected != required_account:
         await session.rollback()
-        raise HTTPException(status_code=403, detail=f"Authorize the configured mailbox {expected}")
+        raise HTTPException(status_code=403, detail=f"Authorize the required mailbox {required_account}")
     try:
         encrypted = encrypt_refresh_token(refresh_token)
     except GmailCredentialError as exc:
         await session.rollback()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    integration = await session.scalar(select(GmailIntegration).where(GmailIntegration.connected.is_(True)))
     now = datetime.now(timezone.utc)
-    if integration is None:
-        integration = GmailIntegration(email_address=connected, connected=True, encrypted_refresh_token=encrypted)
-        session.add(integration)
+    if purpose == "sender":
+        sender_account = await session.scalar(select(GmailSendingAccount).where(GmailSendingAccount.user_id == state_user.id))
+        if sender_account is None:
+            session.add(GmailSendingAccount(user_id=state_user.id, email_address=connected, connected=True, encrypted_refresh_token=encrypted))
+        else:
+            sender_account.email_address = connected
+            sender_account.connected = True
+            sender_account.encrypted_refresh_token = encrypted
+            sender_account.updated_at = now
     else:
-        integration.email_address = connected
-        integration.connected = True
-        integration.encrypted_refresh_token = encrypted
-        integration.updated_at = now
+        integration = await session.scalar(select(GmailIntegration).where(GmailIntegration.connected.is_(True)))
+        if integration is None:
+            integration = GmailIntegration(email_address=connected, connected=True, encrypted_refresh_token=encrypted)
+            session.add(integration)
+        else:
+            integration.email_address = connected
+            integration.connected = True
+            integration.encrypted_refresh_token = encrypted
+            integration.updated_at = now
     await session.commit()
+    if purpose == "sender":
+        return RedirectResponse(f"{app_settings.FRONTEND_URL.rstrip('/')}/?gmail_sender=connected#announcements", status_code=303)
     try:
         await run_manual_watch_renewal(session, integration)
     except Exception as exc:
@@ -198,6 +237,57 @@ async def disconnect_gmail(session: SessionDep, user: CurrentUserDep):
     integration.updated_at = datetime.now(timezone.utc)
     await session.commit()
     return {"detail": "Gmail mailbox disconnected"}
+
+
+@router.get("/api/integrations/gmail/sender/status", response_model=GmailSenderStatusRead)
+async def gmail_sender_status(session: SessionDep, user: CurrentUserDep):
+    _require_spc(user)
+    account = await session.scalar(select(GmailSendingAccount).where(
+        GmailSendingAccount.user_id == user.id,
+        GmailSendingAccount.connected.is_(True),
+    ))
+    return GmailSenderStatusRead(
+        connected=bool(account),
+        email_address=account.email_address if account else None,
+        signature_text=account.signature_text if account else "",
+    )
+
+
+@router.put("/api/integrations/gmail/sender/signature")
+async def update_gmail_sender_signature(payload: GmailSenderSignatureUpdate, session: SessionDep, user: CurrentUserDep):
+    _require_spc(user)
+    account = await session.scalar(select(GmailSendingAccount).where(
+        GmailSendingAccount.user_id == user.id,
+        GmailSendingAccount.connected.is_(True),
+    ))
+    if account is None:
+        raise HTTPException(status_code=409, detail="Connect your sending Gmail account first")
+    account.signature_text = payload.signature_text.strip()
+    account.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return {"signature_text": account.signature_text}
+
+
+@router.delete("/api/integrations/gmail/sender/disconnect")
+async def disconnect_gmail_sender(session: SessionDep, user: CurrentUserDep):
+    _require_spc(user)
+    account = await session.scalar(select(GmailSendingAccount).where(
+        GmailSendingAccount.user_id == user.id,
+        GmailSendingAccount.connected.is_(True),
+    ))
+    if account is None:
+        return {"detail": "Sending Gmail is already disconnected"}
+    try:
+        refresh_token = decrypt_refresh_token(account.encrypted_refresh_token)
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post("https://oauth2.googleapis.com/revoke", data={"token": refresh_token})
+    except Exception:
+        pass
+    account.connected = False
+    account.encrypted_refresh_token = ""
+    account.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return {"detail": "Sending Gmail disconnected"}
 
 
 @router.post("/api/admin/integrations/gmail/watch")
