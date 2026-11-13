@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+import html
 import base64
 import hashlib
 import re
@@ -145,7 +146,10 @@ def parse_gmail_message(message: dict) -> dict:
             visit(child)
     visit(message.get("payload", {}))
     plain = next((body for mime, body in parts if mime == "text/plain"), "")
-    html_text = next((re.sub(r"<[^>]+>", " ", body) for mime, body in parts if mime == "text/html"), "")
+    html_body = next((body for mime, body in parts if mime == "text/html"), "")
+    html_body = re.sub(r"(?i)<(?:br\s*/?|/(?:p|div|li|tr|h[1-6]))\b[^>]*>", "\n", html_body)
+    html_text = html.unescape(re.sub(r"<[^>]+>", " ", html_body))
+    html_text = re.sub(r"[ \t]+\n", "\n", html_text)
     body = plain or html_text
     body = re.split(r"\nOn .{5,160}wrote:\s*$|\n-{2,}\s*Original Message\s*-{2,}", body, maxsplit=1, flags=re.IGNORECASE | re.MULTILINE)[0]
     sender = headers.get("from", "")

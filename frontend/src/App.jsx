@@ -41,7 +41,9 @@ function formatOpportunityDate(value) {
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-function buildAnnouncementBody(company, opportunity) {
+const SOURCE_FACT_LABELS = /^(?:name of (?:the )?company|company|website|eligibility criteria|profile offered|role offered|internship location|job location|work location|location|internship stipend|stipend|ctc(?: offered)?|salary|compensation|package|fixed salary|variable salary|vacancies|no\.?(?: of)? vacancies|rounds|selection process|job description|jd|internship duration|address|role conversion|conversion to fte|pbc|skills required|benefits)\s*:/i
+
+function buildAnnouncementBody(company, opportunity, sourceBody = '') {
   const facts = []
   const keys = new Set()
   const add = (label, value) => {
@@ -69,7 +71,13 @@ function buildAnnouncementBody(company, opportunity) {
     details.eligibility_criteria || details.eligibility,
   ].filter(Boolean).join('; '))
   add('Job location', opportunity?.location || details.location || details.job_location || details.internship_location || company.location)
-  add('Compensation', opportunity?.compensation || details.compensation || details.ctc_offered || details.ctc || details.salary || details.stipend)
+  const compensation = opportunity?.compensation || details.compensation
+  add('Compensation', compensation)
+  const ctc = details.ctc_offered || details.ctc || details.salary
+  const stipend = details.stipend
+  const normalizedCompensation = factText(compensation).toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
+  if (ctc && !normalizedCompensation.includes(factText(ctc).toLocaleLowerCase().replace(/[^a-z0-9]+/g, ''))) add('CTC / salary', ctc)
+  if (stipend && !normalizedCompensation.includes(factText(stipend).toLocaleLowerCase().replace(/[^a-z0-9]+/g, ''))) add('Internship stipend', stipend)
   add('Internship duration', opportunity?.internship_duration || details.internship_duration)
   add('Online assessment date', formatOpportunityDate(opportunity?.assessment_date || details.assessment_date || details.oa_date))
   add('Group discussion date', formatOpportunityDate(opportunity?.group_discussion_date || details.group_discussion_date || details.gd_date))
@@ -91,19 +99,58 @@ function buildAnnouncementBody(company, opportunity) {
     if (standardKeys.has(key.toLocaleLowerCase())) continue
     add(key.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()), value)
   }
+
+  const normalizedFacts = () => facts.join(' ').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
+  const sourceLines = sourceBody
+    .replace(/<\/?(?:div|p|br|li|tr|h[1-6])\b[^>]*>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\*\*/g, '').replace(/__?/g, '').replace(/\s+/g, ' ').trim())
+  for (let i = 0; i < sourceLines.length; i += 1) {
+    const line = sourceLines[i]
+    const match = line.match(/^([^:]{2,70}):\s*(.*)$/)
+    if (!match || !SOURCE_FACT_LABELS.test(`${match[1]}:`)) continue
+    const label = match[1].replace(/^[-*\s]+|[-*\s]+$/g, '').trim()
+    let value = match[2].replace(/^[,\s]+|[\s,]+$/g, '').trim()
+    const collectsFollowingLines = /^(?:rounds|selection process|internship location|job location|work location|address)$/i.test(label)
+    if ((!value && !collectsFollowingLines) || /(?:consent|google|registration|application) form.*\b(?:by|deadline)\b/i.test(line)) continue
+    if (/^(?:from|to|cc|bcc|subject|date|sent)$/i.test(label)) continue
+    if (collectsFollowingLines) {
+      const continuation = []
+      for (let next = i + 1; next < sourceLines.length; next += 1) {
+        const candidate = sourceLines[next]
+        if (!candidate) continue
+        if (/^(?:hello everyone|dear students|interested students|regards\b|thanks\b)/i.test(candidate)) break
+        if (/database|student list|student data/i.test(candidate) && /\b(?:submit|send|share|provide)\b/i.test(candidate)) break
+        if (/^[^:]{2,70}:\s*/.test(candidate) && SOURCE_FACT_LABELS.test(candidate)) break
+        continuation.push(candidate)
+        i = next
+        if (continuation.length >= 12) break
+      }
+      if (continuation.length) value = [value, ...continuation].filter(Boolean).join('; ')
+    }
+    if (!value) continue
+    const normalizedValue = value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '')
+    if (!normalizedValue || normalizedFacts().includes(normalizedValue)) continue
+    const existingKey = label.toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    if (keys.has(existingKey)) facts.push(`${label} (from placement email): ${value}`)
+    else add(label, value)
+  }
   return `Hello everyone,\n\n${company.name} is recruiting students. Please find the details below:\n\n${facts.join('\n\n')}`
 }
 
-function tomorrowAtTime(time) {
+function formatDeadline(time) {
   const [hour, minute] = time.split(':').map(Number)
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(new Date()).map((part) => [part.type, part.value]))
-  return new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + 1, hour || 0, minute || 0))
-}
-
-function formatDeadline(time) {
-  return `${tomorrowAtTime(time).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })} IST`
+  const tomorrow = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + 1))
+  const dateLabel = tomorrow.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+  const hour12 = (hour % 12) || 12
+  const period = hour >= 12 ? 'PM' : 'AM'
+  return `tomorrow (${dateLabel}) at ${hour12}:${String(minute).padStart(2, '0')} ${period} IST`
 }
 
 function App() {
@@ -486,8 +533,10 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
   const [body, setBody] = useState('')
 
   useEffect(() => {
-    if (!companyId) { setSourceBody(''); setAdditionalDetails('{}'); return }
+    if (!companyId) { setPlacementSource(null); setSourceBody(''); setAdditionalDetails('{}'); setExtraLinks(''); setFiles([]); return }
     setPlacementSource(null)
+    setSourceBody('')
+    setExtraLinks('')
     setFiles([])
     request('/api/admin/placement/pending/?status=APPROVED', { headers }).then((items) => {
       const source = items.find((item) => String(item.published_company_id) === String(companyId))
@@ -517,9 +566,9 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
     if (selectedCompany && currentTemplate.subject) {
       setSubject(currentTemplate.subject.replaceAll('{company_name}', selectedCompany.name).replaceAll('{role}', selectedCompany.process.replaceAll('_', ' ')))
       const source = String(placementSource?.published_company_id) === String(selectedCompany.id) ? placementSource : null
-      setBody(buildAnnouncementBody(selectedCompany, source))
+      setBody(buildAnnouncementBody(selectedCompany, source, sourceBody))
     }
-  }, [companyId, placementSource, selectedCompany?.name, selectedCompany?.process])
+  }, [companyId, placementSource, sourceBody, selectedCompany?.name, selectedCompany?.process])
 
   function splitEmails(value) { return value.split(/[\s,;]+/).map((email) => email.trim()).filter(Boolean) }
   async function saveConfig() {
