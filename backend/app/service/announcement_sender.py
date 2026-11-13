@@ -2,9 +2,8 @@
 import base64
 import html
 import mimetypes
+import re
 from email.message import EmailMessage
-from typing import Any
-
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,9 +47,6 @@ def build_announcement_message(
     body: str,
     signature_text: str,
     include_signature: bool,
-    consent_form_url: str,
-    links: list[dict[str, str]],
-    additional_details: dict[str, Any],
     attachments: list[tuple[str, str, bytes]],
 ) -> str:
     message = EmailMessage()
@@ -62,29 +58,17 @@ def build_announcement_message(
         message["Bcc"] = ", ".join(bcc_emails)
     message["Subject"] = subject
     signed_body = f"{body.rstrip()}\n\n{signature_text.strip()}" if include_signature and signature_text.strip() else body
-    def display(value: Any) -> str:
-        if isinstance(value, list):
-            return ", ".join(display(item) for item in value)
-        if isinstance(value, dict):
-            return "; ".join(f"{key}: {display(item)}" for key, item in value.items())
-        return str(value)
+    message.set_content(signed_body)
 
-    details_lines = [f"{key.replace('_', ' ').title()}: {display(value)}" for key, value in additional_details.items() if value not in (None, "", [], {}) and key != "original_email_body"]
-    details_text = "\n".join(details_lines)
-    plain_body = f"{signed_body}\n\n{details_text}\n\nConsent form: {consent_form_url}" if details_text else f"{signed_body}\n\nConsent form: {consent_form_url}"
-    message.set_content(plain_body + "".join(f"\n{link['label']}: {link['url']}" for link in links))
-
-    safe_body = "<br>".join(html.escape(line) for line in signed_body.splitlines())
-    links_html = "".join(
-        f'<li><a href="{html.escape(link["url"], quote=True)}">{html.escape(link["label"])}</a></li>'
-        for link in links
-    )
-    details_html = "".join(f"<p><strong>{html.escape(key.replace('_', ' ').title())}:</strong> {html.escape(display(value))}</p>" for key, value in additional_details.items() if value not in (None, "", [], {}) and key != "original_email_body")
+    escaped_body = html.escape(signed_body)
+    safe_body = re.sub(
+        r"https?://[^\s<]+",
+        lambda match: f'<a href="{match.group(0)}">{match.group(0)}</a>',
+        escaped_body,
+    ).replace("\n", "<br>")
     html_content = (
         f"<div style=\"font-family:Arial,sans-serif;line-height:1.6\"><p>{safe_body}</p>"
-        f"{details_html}"
-        f'<p><a href="{html.escape(consent_form_url, quote=True)}">Submit the required consent form</a></p>'
-        f"{f'<ul>{links_html}</ul>' if links_html else ''}</div>"
+        "</div>"
     )
     message.add_alternative(html_content, subtype="html")
     for filename, content_type, data in attachments:

@@ -541,9 +541,6 @@ async def send_campaign(campaign_id: int, payload: CampaignSendRequest, session:
                 body=campaign.body,
                 signature_text=campaign.signature_text,
                 include_signature=campaign.include_signature,
-                consent_form_url=campaign.consent_form_url,
-                links=campaign.links,
-                additional_details=campaign.additional_details or {},
                 attachments=attachments,
             )
             message_ids.append(await send_gmail_message(token, raw))
