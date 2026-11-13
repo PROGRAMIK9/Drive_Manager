@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bell, BriefcaseBusiness, Building2, CalendarDays, CircleAlert, Download, Heart, LogOut, MapPin, Menu, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Sparkles, Star, Trash2, Users, X } from 'lucide-react'
+import { Bell, BriefcaseBusiness, Building2, CalendarDays, CircleAlert, Download, Heart, LogOut, MapPin, Menu, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Sparkles, Star, Trash2, Users, X, MailCheck } from 'lucide-react'
 import CompanyForm from './CompanyForm'
 import './App.css'
 
@@ -36,6 +36,9 @@ function App() {
   const [activeView, setActiveView] = useState('opportunities')
   const [users, setUsers] = useState([])
   const [interestSummary, setInterestSummary] = useState([])
+  const [pendingOpportunities, setPendingOpportunities] = useState([])
+  const [gmailStatus, setGmailStatus] = useState({ connected: false })
+  const [gmailBusy, setGmailBusy] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
@@ -105,6 +108,15 @@ function App() {
     const headers = { Authorization: `Bearer ${token}` }
     if (activeView === 'users') request('/user/', { headers }).then(setUsers).catch((e) => setError(e.message))
     if (activeView === 'interest') request('/company/interest-summary', { headers }).then(setInterestSummary).catch((e) => setError(e.message))
+    if (activeView === 'email-review') {
+      const refreshReview = () => {
+        request('/api/admin/placement/pending/', { headers }).then(setPendingOpportunities).catch((e) => setError(e.message))
+        request('/api/integrations/gmail/status', { headers }).then(setGmailStatus).catch((e) => setError(e.message))
+      }
+      refreshReview()
+      const timer = window.setInterval(refreshReview, 30000)
+      return () => window.clearInterval(timer)
+    }
   }, [token, user, activeView])
 
   function handleAuthenticated(nextToken, nextUser) {
@@ -188,6 +200,37 @@ function App() {
     } catch (requestError) { setError(requestError.message) }
   }
 
+  async function runGmailAction(action) {
+    setGmailBusy(true)
+    try {
+      if (action === 'connect') {
+        const authorization = await request('/api/integrations/gmail/connect', {
+          method: 'POST', headers: { Authorization: `Bearer ${token}` },
+        })
+        window.location.assign(authorization.authorization_url)
+        return
+      }
+      const result = await request(action === 'disconnect' ? '/api/integrations/gmail/disconnect' : `/api/admin/integrations/gmail/${action}`, {
+        method: action === 'disconnect' ? 'DELETE' : 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (action === 'sync') setError(`Mailbox sync checked ${result.fetched} messages, queued ${result.placement_opportunities} placement opportunities for SPC review, and ignored ${result.ignored_sender} messages from outside RVCE.`)
+      const status = await request('/api/integrations/gmail/status', { headers: { Authorization: `Bearer ${token}` } })
+      setGmailStatus(status)
+    } catch (requestError) { setError(requestError.message) } finally { setGmailBusy(false) }
+  }
+
+  function openDuplicateMatch(match) {
+    if (match.record_type === 'PENDING') {
+      document.getElementById(`pending-opportunity-${match.record_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
+    setSearch('')
+    setActiveFilter('All opportunities')
+    setActiveView('companies')
+    window.setTimeout(() => document.getElementById(`published-company-${match.record_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
+  }
+
   return (
     <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${sidebarOpen ? 'sidebar-visible' : ''}`}>
       {sidebarOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
@@ -200,6 +243,7 @@ function App() {
           {isSpc && <>
             <button className={`nav-item ${activeView === 'users' ? 'active' : ''}`} onClick={() => selectView('users')} title="Manage users"><Users size={18} /><span className="nav-label">Manage users</span></button>
             <button className={`nav-item ${activeView === 'interest' ? 'active' : ''}`} onClick={() => selectView('interest')} title="Drive interest"><Heart size={18} /><span className="nav-label">Drive interest</span></button>
+            <button className={`nav-item ${activeView === 'email-review' ? 'active' : ''}`} onClick={() => selectView('email-review')} title="Email review"><MailCheck size={18} /><span className="nav-label">Email review</span></button>
           </>}
         </nav>
         <div className="sidebar-spacer" />
@@ -212,9 +256,9 @@ function App() {
         <section className="welcome-row"><div><p className="kicker">Good morning, {user?.name?.split(' ')[0] || 'there'}</p><h1>Find the right <em>next move.</em></h1><p className="subhead">Discover companies, mark your interest, and stay ready for what is coming.</p></div><div className="date-stamp"><CalendarDays size={17} /><span>October 2026<br /><strong>Campus season</strong></span></div></section>
         <section className="stats-row"><div className="stat"><span className="stat-icon coral"><BriefcaseBusiness size={18} /></span><div><strong>{companies.length}</strong><span>open opportunities</span></div></div><div className="stat"><span className="stat-icon blue"><Heart size={18} /></span><div><strong>{companies.filter((company) => company.interested).length}</strong><span>students engaged</span></div></div><div className="stat"><span className="stat-icon gold"><Star size={18} /></span><div><strong>Ready</strong><span>your profile status</span></div></div></section>
         {error && <div className="error-banner"><CircleAlert size={18} />{error}<button onClick={() => setError('')}><X size={16} /></button></div>}
-        {activeView === 'users' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools</span><h2>People on Driveboard</h2></div></section><div className="management-list">{users.map((person) => <article className="management-row" key={person.id}><div className="user-avatar">{person.name.slice(0, 1).toUpperCase()}</div><div className="management-details"><strong>{person.name}</strong><span>{person.email}</span></div><span className={`role-badge ${person.role.toLowerCase()}`}>{person.role}</span><select aria-label={`Role for ${person.name}`} value={person.role} onChange={(event) => changeRole(person, event.target.value)}><option value="STUDENT">Student</option><option value="SPC">SPC coordinator</option></select><select aria-label={`Year of passing for ${person.name}`} value={person.year_of_passing || ''} onChange={(event) => changeUserYear(person, event.target.value)}><option value="">Unassigned</option><option value="2027">2027</option><option value="2028">2028</option></select></article>)}</div></> : activeView === 'interest' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools</span><h2>Interest by drive</h2></div></section><div className="interest-list">{interestSummary.map((drive) => <article className="interest-panel" key={drive.company_id}><div className="interest-heading"><div><span className="process-tag">{drive.process.replace('_', ' ')}</span><h3>{drive.company_name}</h3><span className="company-meta">{drive.location} · {new Date(drive.date).toLocaleDateString()}</span></div><span className="interest-count">{drive.interested_users.length} interested</span></div>{drive.interested_users.length ? <div className="interested-people">{drive.interested_users.map((person) => <span className="person-chip" key={person.id}>{person.name} <small>{person.email}</small></span>)}</div> : <p className="no-interest">No students have marked interest yet.</p>}</article>)}</div></> : <><section className="section-heading"><div><span className="section-kicker">Explore the board</span><h2>Open opportunities</h2></div>{isSpc && <button className="primary-button" onClick={() => { setEditingCompany(null); setShowForm(true) }}><Plus size={17} /> Add company</button>}</section>
+        {activeView === 'email-review' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools · Gmail integration</span><h2>Placement email review</h2></div></section><article className="interest-panel gmail-settings"><div><strong>{gmailStatus.connected ? (gmailStatus.watch_expiration ? "Gmail connected · watch active" : "Gmail connected · starting watch") : "Gmail not connected"}</strong><span>{gmailStatus.email_address || "Mailbox: maaryamannp.mca25@rvce.edu.in"}</span><small>Last sync: {gmailStatus.last_sync_at ? new Date(gmailStatus.last_sync_at).toLocaleString() : "Pending first sync"} · Watch expires: {gmailStatus.watch_expiration ? new Date(gmailStatus.watch_expiration).toLocaleString() : "Starting automatically"}</small>{gmailStatus.last_error && <small className="review-warning">{gmailStatus.last_error}</small>}</div><div className="review-actions">{!gmailStatus.connected ? <button className="primary-button" disabled={gmailBusy} onClick={() => runGmailAction("connect")}>Connect Gmail</button> : <><button className="secondary-button" disabled={gmailBusy} onClick={() => runGmailAction("watch")}>Start / renew watch</button><button className="secondary-button" disabled={gmailBusy} onClick={() => runGmailAction("sync")}>Sync mailbox</button><button className="secondary-button" disabled={gmailBusy} onClick={() => runGmailAction("disconnect")}>Disconnect</button></>}</div></article><p className="review-intro">New inbox messages are checked automatically. Emails from @rvce.edu.in are classified and placement details are sent here for SPC review; nothing is published to students until an SPC approves it.</p>{pendingOpportunities.length ? <div className="interest-list">{pendingOpportunities.map((item) => <ReviewOpportunity key={item.id} item={item} token={token} onUpdate={(updated) => setPendingOpportunities((items) => items.map((current) => current.id === updated.id ? updated : current))} onError={(message) => setError(message)} onOpenMatch={openDuplicateMatch} />)}</div> : <div className="empty-state"><MailCheck size={30} /><strong>No pending opportunities</strong><span>New review items will be listed here.</span></div>}</> : activeView === 'users' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools</span><h2>People on Driveboard</h2></div></section><div className="management-list">{users.map((person) => <article className="management-row" key={person.id}><div className="user-avatar">{person.name.slice(0, 1).toUpperCase()}</div><div className="management-details"><strong>{person.name}</strong><span>{person.email}</span></div><span className={`role-badge ${person.role.toLowerCase()}`}>{person.role}</span><select aria-label={`Role for ${person.name}`} value={person.role} onChange={(event) => changeRole(person, event.target.value)}><option value="STUDENT">Student</option><option value="SPC">SPC coordinator</option></select><select aria-label={`Year of passing for ${person.name}`} value={person.year_of_passing || ''} onChange={(event) => changeUserYear(person, event.target.value)}><option value="">Unassigned</option><option value="2027">2027</option><option value="2028">2028</option></select></article>)}</div></> : activeView === 'interest' && isSpc ? <><section className="section-heading"><div><span className="section-kicker">SPC tools</span><h2>Interest by drive</h2></div></section><div className="interest-list">{interestSummary.map((drive) => <article className="interest-panel" key={drive.company_id}><div className="interest-heading"><div><span className="process-tag">{drive.process.replace('_', ' ')}</span><h3>{drive.company_name}</h3><span className="company-meta">{drive.location} · {new Date(drive.date).toLocaleDateString()}</span></div><span className="interest-count">{drive.interested_users.length} interested</span></div>{drive.interested_users.length ? <div className="interested-people">{drive.interested_users.map((person) => <span className="person-chip" key={person.id}>{person.name} <small>{person.email}</small></span>)}</div> : <p className="no-interest">No students have marked interest yet.</p>}</article>)}</div></> : <><section className="section-heading"><div><span className="section-kicker">Explore the board</span><h2>Open opportunities</h2></div>{isSpc && <button className="primary-button" onClick={() => { setEditingCompany(null); setShowForm(true) }}><Plus size={17} /> Add company</button>}</section></>}
         <div className="toolbar">{!isSpc && <label className="year-picker">Year of passing<select value={selectedYear} onChange={(event) => { const year = Number(event.target.value); setSelectedYear(year); localStorage.setItem('drive-manager-year', String(year)) }}><option value={2027}>2027</option><option value={2028}>2028</option></select></label>}<label className="search-field"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search company, place or process" /></label><div className="filter-pills">{['All opportunities', 'online_assesment', 'interview', 'ppt', 'group_discussion', 'pen_paper_test', 'technical_assessment', ...(isSpc ? ['send_mail'] : [])].map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter.replaceAll('_', ' ')}</button>)}</div></div>
-        {loading ? <div className="empty-state"><div className="spinner" />Loading opportunities...</div> : visibleCompanies.length ? <div className="company-grid">{visibleCompanies.map((company, index) => <CompanyCard key={company.id} company={company} index={index} isSpc={isSpc} onToggle={toggleInterest} onEdit={(selected) => { setEditingCompany(selected); setShowForm(true) }} onDelete={deleteCompany} />)}</div> : <div className="empty-state"><Building2 size={30} /><strong>No opportunities yet</strong><span>Try another search or check back later.</span></div>}</>}
+        {activeView !== 'email-review' && (loading ? <div className="empty-state"><div className="spinner" />Loading opportunities...</div> : visibleCompanies.length ? <div className="company-grid">{visibleCompanies.map((company, index) => <CompanyCard key={company.id} company={company} index={index} isSpc={isSpc} onToggle={toggleInterest} onEdit={(selected) => { setEditingCompany(selected); setShowForm(true) }} onDelete={deleteCompany} />)}</div> : <div className="empty-state"><Building2 size={30} /><strong>No opportunities yet</strong><span>Try another search or check back later.</span></div>)}
         <footer className="footer"><span>Driveboard · Built for thoughtful next steps</span><span>Student placement workspace</span></footer>
       </main>
       {showForm && <CompanyForm company={editingCompany} onClose={() => { setShowForm(false); setEditingCompany(null) }} onSave={saveCompany} />}
@@ -292,11 +336,34 @@ function AuthScreen({ onAuthenticated }) {
   return <div className="auth-shell"><div className="auth-aside"><div className="brand"><span className="brand-mark"><Sparkles size={16} /></span><span>Drive<span className="brand-light">board</span></span></div><div className="auth-quote"><span className="quote-mark">“</span><h1>Small steps.<br /><em>Good direction.</em></h1><p>A calmer way to find the companies and opportunities that fit your next chapter.</p></div><div className="aside-footer"><span>01 / 03</span><span>Student opportunity desk</span></div></div><main className="auth-main"><div className="auth-form-wrap"><span className="section-kicker">Welcome</span><h2>Sign in to your board</h2><p className="form-intro">Use your verified RVCE Google account.</p>{error && <div className="error-banner"><CircleAlert size={17} />{error}</div>}<div className="google-login-wrap">{busy ? <div className="empty-state"><div className="spinner" />Signing in...</div> : <><div ref={buttonContainer} className="google-signin-host" />{!googleReady && <span className="google-signin-placeholder">Loading Google sign-in…</span>}</>}</div></div></main></div>
 }
 
+function ReviewOpportunity({ item, token, onUpdate, onError, onOpenMatch }) {
+  async function act(action, payload) {
+    try {
+      const updated = await request(`/api/admin/placement/pending/${item.id}${action}`, {
+        method: action ? 'POST' : 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+        ...(payload ? { body: JSON.stringify(payload) } : {}),
+      })
+      onUpdate(updated)
+    } catch (error) { onError(error.message) }
+  }
+  return <article id={`pending-opportunity-${item.id}`} className="interest-panel review-card">
+    <div className="interest-heading"><div><span className={`review-status ${item.eligibility_status.toLowerCase()}`}>{item.eligibility_status.replaceAll('_', ' ')}</span><h3>{item.company_name}{item.job_title ? ` · ${item.job_title}` : ''}</h3><span className="company-meta">{item.opportunity_type || 'Placement opportunity'} · {item.location || 'Location not specified'}</span></div><span className="role-badge">{item.review_status}</span></div>
+    {item.possible_duplicates?.length > 0 && <div className="duplicate-warning" role="note"><strong>Possible duplicate</strong><span>Same normalized company, process, and date found:</span><ul>{item.possible_duplicates.map((match) => <li key={`${match.record_type}-${match.record_id}-${match.process}-${match.event_date}`}><button type="button" onClick={() => onOpenMatch(match)}>Open {match.record_type === 'PENDING' ? 'pending review' : 'published company'} #{match.record_id}</button><span>{match.company_name} · {match.process.replaceAll('_', ' ')} · {new Date(match.event_date).toLocaleDateString()}</span></li>)}</ul></div>}
+    {item.description && <p className="review-copy">{item.description}</p>}
+    <div className="review-facts"><span>Department submission: {item.department_submission_date ? new Date(item.department_submission_date).toLocaleString() : 'Not specified'}</span><span>OA: {item.assessment_date ? new Date(item.assessment_date).toLocaleString() : 'Not specified'}</span><span>GD: {item.group_discussion_date ? new Date(item.group_discussion_date).toLocaleString() : 'Not specified'}</span><span>Interview dates: {item.interview_dates?.length ? item.interview_dates.map((date) => new Date(date).toLocaleString()).join(', ') : item.interview_date ? new Date(item.interview_date).toLocaleString() : 'Not specified'}</span><span>Application deadline: {item.application_deadline ? new Date(item.application_deadline).toLocaleString() : 'Not specified'}</span><span>Courses: {item.eligible_courses.join(', ') || 'Unspecified'}</span><span>Batches: {item.eligible_batches.join(', ') || 'Unspecified'}</span><span>Minimum CGPA: {item.minimum_cgpa ?? 'Unspecified'}</span><span>AI confidence: {item.ai_confidence ?? 'Not available'}</span></div>
+    {item.missing_information.length > 0 && <p className="review-warning">Needs clarification: {item.missing_information.join(', ')}</p>}
+    {(item.source_subject || item.source_sender) && <p className="review-source">Source: {item.source_subject || 'Email'}{item.source_sender ? ` · ${item.source_sender}` : ''}{item.source_link && <> · <a href={item.source_link} target="_blank" rel="noreferrer">Open original</a></>}</p>}
+    {item.review_status === 'PENDING' && <div className="review-actions"><button className="secondary-button" onClick={() => { const company_name = window.prompt('Company name', item.company_name); if (!company_name) return; const application_deadline = window.prompt('Application deadline (ISO date/time)', item.application_deadline || ''); act('', { company_name, application_deadline: application_deadline || null }) }}>Edit details</button><button className="secondary-button" onClick={() => act('/reject', { reason: window.prompt('Reason for rejection') || 'Rejected by SPC' })}>Reject</button><button className="primary-button" onClick={() => act('/approve')}>Approve and publish</button></div>}
+    {item.rejection_reason && <p className="review-warning">Rejected: {item.rejection_reason}</p>}
+  </article>
+}
+
 function CompanyCard({ company, index, isSpc, onToggle, onEdit, onDelete }) {
   const colors = ['peach', 'sky', 'sage', 'lavender']
   const eventDate = new Date(company.date)
   const eventPassed = eventDate.getTime() <= Date.now()
-  return <article className="company-card" style={{ '--delay': `${index * 70}ms` }}><div className={`company-logo ${colors[index % colors.length]}`}>{company.name?.slice(0, 2).toUpperCase()}</div><div className="company-card-body"><div className="card-topline"><span className="process-tag">{company.process?.replace('_', ' ')}</span><button className={company.interested ? 'heart-button saved' : 'heart-button'} title={eventPassed ? "Interest closed" : "Mark interest"} aria-label={eventPassed ? "Interest closed" : "Mark interest"} disabled={eventPassed} onClick={() => onToggle(company.id)}><Heart size={18} fill={company.interested ? 'currentColor' : 'none'} /></button></div><h3>{company.name}</h3><p className="company-meta"><MapPin size={15} />{company.location}</p><div className="card-bottom"><span><CalendarDays size={14} />{eventDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {eventDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>{isSpc && <div className="company-actions"><button className="edit-button" onClick={() => onEdit(company)}><Pencil size={14} /> Edit</button><button className="delete-button" onClick={() => onDelete(company)} aria-label={`Delete ${company.name}`} title={`Delete ${company.name}`}><Trash2 size={14} /> Delete</button></div>}</div></div></article>
+  return <article id={`published-company-${company.id}`} className="company-card" style={{ '--delay': `${index * 70}ms` }}><div className={`company-logo ${colors[index % colors.length]}`}>{company.name?.slice(0, 2).toUpperCase()}</div><div className="company-card-body"><div className="card-topline"><span className="process-tag">{company.process?.replace('_', ' ')}</span><button className={company.interested ? 'heart-button saved' : 'heart-button'} title={eventPassed ? "Interest closed" : "Mark interest"} aria-label={eventPassed ? "Interest closed" : "Mark interest"} disabled={eventPassed} onClick={() => onToggle(company.id)}><Heart size={18} fill={company.interested ? 'currentColor' : 'none'} /></button></div><h3>{company.name}</h3><p className="company-meta"><MapPin size={15} />{company.location}</p><div className="card-bottom"><span><CalendarDays size={14} />{eventDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {eventDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>{isSpc && <div className="company-actions"><button className="edit-button" onClick={() => onEdit(company)}><Pencil size={14} /> Edit</button><button className="delete-button" onClick={() => onDelete(company)} aria-label={`Delete ${company.name}`} title={`Delete ${company.name}`}><Trash2 size={14} /> Delete</button></div>}</div></div></article>
 }
 
 export default App

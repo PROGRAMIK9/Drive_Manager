@@ -32,6 +32,24 @@ async def send_interest_notification(
     )
 
 
+async def send_company_added_notification(
+    recipient: str, recipient_name: str, company_name: str, company_process: str,
+    company_location: str, company_date: str,
+) -> None:
+    await send_template_email(
+        recipient=recipient,
+        subject=f"New company added to Driveboard: {company_name}",
+        template_name="company_added.html",
+        context={
+            "recipient_name": recipient_name,
+            "company_name": company_name,
+            "company_process": company_process.replace("_", " ").title(),
+            "company_location": company_location,
+            "company_date": datetime.fromisoformat(company_date),
+        },
+    )
+
+
 async def send_verification_email(recipient: str, recipient_name: str, verification_url: str) -> None:
     await send_template_email(
         recipient=recipient,

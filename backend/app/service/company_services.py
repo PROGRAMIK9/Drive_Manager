@@ -9,6 +9,7 @@ from app.database.database import SessionDep, get_async_session
 from app.schema.models import CompanyCreate, CompanyRead, CompanyUpdate
 from app.schema.database import Company, EventReminder, Interested, Process, Role, User
 from app.service.mail_services import queue_event_reminder
+from app.service.mail_services import queue_spc_company_notification
 from app.service.user_services import CurrentUserDep
 
 class CompanyService:
@@ -46,6 +47,14 @@ class CompanyService:
         )
         await self.session.commit()
         await queue_event_reminder(self.session, company.id, company.date)
+        queue_spc_company_notification(
+            self.background_tasks,
+            recipients=[(user.email, user.name) for user in users if user.role == Role.spc and user.id != self.user.id],
+            company_name=company.name,
+            company_process=company.process.value,
+            company_location=company.location,
+            company_date=company.date,
+        )
         return company
 
     async def update(self, company_id: int, company_details: CompanyUpdate)-> CompanyRead:
@@ -166,7 +175,7 @@ class CompanyService:
         if self.user.role != Role.spc:
             query = query.where(Company.process != Process.send_mail)
         if self.user.role != Role.spc:
-            query = query.where(Company.year_of_passing == (self.user.year_of_passing or 2027))
+            query = query.where(Company.year_of_passing.in_((self.user.year_of_passing or 2027, 0)))
         rows = (await self.session.execute(query)).all()
         if not rows:
             return []

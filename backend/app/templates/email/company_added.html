@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <body style="margin:0;background:#f7f5f0;font-family:Arial,sans-serif;color:#243039">
+    <main style="max-width:560px;margin:32px auto;padding:28px;background:#fff;border-radius:12px">
+      <p style="color:#cc5938;font-size:12px;font-weight:bold;letter-spacing:.12em;text-transform:uppercase">Driveboard update</p>
+      <h1 style="font-size:24px">A company was added</h1>
+      <p>Hello {{ recipient_name }},</p>
+      <p><strong>{{ company_name }}</strong> was added to Driveboard by an SPC.</p>
+      <p>{{ company_process }} · {{ company_location }} · {{ company_date.strftime('%d %b %Y, %I:%M %p') }}</p>
+      <p>Sign in to review the opportunity and its details.</p>
+    </main>
+  </body>
+</html>

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.database import get_async_session
 from app.schema.database import EventReminder
+from app.schema.database import Role, User
 from app.tasks.mail_tasks import send_due_event_reminder, send_verification_email
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,36 @@ def queue_interest_notification(
         )
     except Exception:
         logger.exception("Unable to queue interest notification")
+
+
+async def send_spc_company_notification(
+    recipients: list[tuple[str, str]], company_name: str, company_process: str, company_location: str, company_date: str,
+) -> None:
+    from app.tasks.mail_tasks import send_company_added_notification
+
+    try:
+        for email, name in recipients:
+            await send_company_added_notification(
+                email, name, company_name, company_process, company_location, company_date,
+            )
+    except Exception:
+        logger.exception("SPC company-added notification failed for %s", company_name)
+
+
+async def notify_spcs_company_added_background(
+    recipients: list[tuple[str, str]], company_name: str, company_process: str, company_location: str, company_date: str,
+) -> None:
+    await send_spc_company_notification(
+        recipients, company_name, company_process, company_location, company_date,
+    )
+
+
+def queue_spc_company_notification(background_tasks: BackgroundTasks, *, recipients: list[tuple[str, str]], company_name: str,
+                                   company_process: str, company_location: str, company_date: datetime) -> None:
+    background_tasks.add_task(
+        send_spc_company_notification, recipients, company_name, company_process,
+        company_location, company_date.isoformat(),
+    )
 
 
 async def queue_event_reminder(session: AsyncSession, company_id: int, company_date: datetime) -> None:

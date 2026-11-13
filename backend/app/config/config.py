@@ -74,6 +74,9 @@ google_auth_settings = GoogleAuthSettings()
 
 class AppSettings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    FRONTEND_URL: str = "http://127.0.0.1:5173"
+    SPCS_GMAIL_ADDRESS: str = "maaryamannp.mca25@rvce.edu.in"
+    PLACEMENT_SENDER_DOMAIN: str = "rvce.edu.in"
 
     model_config = {
         "env_file": ENV_FILE_PATH,
@@ -87,6 +90,34 @@ class AppSettings(BaseSettings):
 
 
 app_settings = AppSettings()
+
+
+class GmailSettings(BaseSettings):
+    GOOGLE_OAUTH_CLIENT_ID: str = ""
+    GOOGLE_OAUTH_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://127.0.0.1:8000/api/integrations/gmail/callback"
+    GOOGLE_PUBSUB_TOPIC: str = ""
+    GOOGLE_PUBSUB_SUBSCRIPTION: str = "projects/model-arcadia-514605-a9/subscriptions/driveboard-gmail-events-sub"
+    GOOGLE_PUBSUB_AUDIENCE: str = ""
+    GOOGLE_PUBSUB_SERVICE_ACCOUNT: str = ""
+    SPCS_GMAIL_ADDRESS: str = "maaryamannp.mca25@rvce.edu.in"
+    PLACEMENT_SENDER_DOMAIN: str = "rvce.edu.in"
+    TOKEN_ENCRYPTION_KEY: str = ""
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
+    LLM_PROVIDER: str = "groq"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = ""
+    OLLAMA_TIMEOUT: int = 120
+
+    model_config = {
+        "env_file": ENV_FILE_PATH,
+        "case_sensitive": True,
+        "extra": "ignore",
+    }
+
+
+gmail_settings = GmailSettings()
 
 
 class MailSettings(BaseSettings):

@@ -22,6 +22,32 @@ services:
         value: "60"
       - key: GOOGLE_CLIENT_ID
         sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: GOOGLE_PUBSUB_TOPIC
+        sync: false
+      - key: GOOGLE_PUBSUB_SUBSCRIPTION
+        sync: false
+      - key: GOOGLE_PUBSUB_AUDIENCE
+        sync: false
+      - key: GOOGLE_PUBSUB_SERVICE_ACCOUNT
+        sync: false
+      - key: SPCS_GMAIL_ADDRESS
+        value: maaryamannp.mca25@rvce.edu.in
+      - key: PLACEMENT_SENDER_DOMAIN
+        value: rvce.edu.in
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
       - key: RVCE_EMAIL_DOMAIN
         sync: false
       - key: SPC_EMAILS
