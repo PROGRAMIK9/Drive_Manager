@@ -91,7 +91,11 @@ async def _ensure_config(session):
         legacy_list.active = False
     recipients_without_list = (await session.scalars(select(PlacementRecipient).where(
         PlacementRecipient.active.is_(True),
-        ~PlacementRecipient.recipient_list_id.in_(select(PlacementRecipientList.id).where(PlacementRecipientList.list_key == "all_students")),
+        ~PlacementRecipient.recipient_list_id.in_(select(PlacementRecipientList.id).where(
+            PlacementRecipientList.list_key.in_(
+                ["all_students", "mca_considered", "mca_not_considered"],
+            ),
+        )),
     ))).all()
     existing = {item.email for item in (await session.scalars(select(PlacementRecipient).where(
         PlacementRecipient.recipient_list_id == lists["all_students"].id,
