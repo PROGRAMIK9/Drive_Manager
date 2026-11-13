@@ -51,7 +51,8 @@ class CompanyBase(SQLModel):
     @field_validator("year_of_passing")
     @classmethod
     def validate_year(cls, value: int) -> int:
-        if value not in (2027, 2028):
+        # 0 is the stored sentinel for opportunities open to all batches.
+        if value not in (0, 2027, 2028):
             raise ValueError("Year of passing must be 2027 or 2028")
         return value
 

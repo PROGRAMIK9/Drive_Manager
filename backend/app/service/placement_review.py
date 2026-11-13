@@ -140,9 +140,9 @@ async def approve_opportunity(session: AsyncSession, item: PendingPlacementOppor
         process=process,
         location=item.location or "Not specified",
         date=event_date,
-        # The legacy company row supports one batch; use a sentinel so unknown or
-        # multi-batch email opportunities are not silently treated as 2027-only.
-        year_of_passing=(item.eligible_batches[0] if len(item.eligible_batches) == 1 and item.eligible_batches[0] in (2027, 2028) else 0),
+        # The legacy company row supports one batch; default unknown or multi-batch
+        # opportunities to the existing default batch.
+        year_of_passing=(item.eligible_batches[0] if len(item.eligible_batches) == 1 and item.eligible_batches[0] in (2027, 2028) else 2027),
         considered=False,
     )
     session.add(company)
