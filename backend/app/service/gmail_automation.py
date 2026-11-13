@@ -81,7 +81,11 @@ async def _extract_and_queue(session, email_row: ProcessedEmail) -> str:
         received_at=email_row.received_at,
         body=body,
     )
-    email_row.extracted_data = {**(email_row.extracted_data or {}), "placement_extraction": result}
+    email_row.extracted_data = {
+        **(email_row.extracted_data or {}),
+        "placement_extraction": result,
+        "additional_details": result.get("additional_details", {}),
+    }
     email_row.classification = "PLACEMENT_OPPORTUNITY" if result["is_placement_opportunity"] else "NOT_PLACEMENT"
     email_row.processing_error = None
     email_row.updated_at = datetime.now(timezone.utc)

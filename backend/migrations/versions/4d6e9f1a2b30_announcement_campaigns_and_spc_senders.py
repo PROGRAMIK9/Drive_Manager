@@ -72,6 +72,7 @@ def upgrade() -> None:
         sa.Column("template_key", sa.String(length=40), nullable=False),
         sa.Column("subject", sa.Text(), nullable=False),
         sa.Column("body", sa.Text(), nullable=False),
+        sa.Column("additional_details", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
         sa.Column("signature_text", sa.Text(), nullable=False, server_default=""),
         sa.Column("include_signature", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("to_emails", sa.JSON(), nullable=False),

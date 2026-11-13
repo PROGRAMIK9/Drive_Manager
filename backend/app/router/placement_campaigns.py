@@ -42,15 +42,10 @@ ALLOWED_FILE_TYPES = {
     ".doc": {"application/msword", "application/octet-stream"},
 }
 DEFAULT_TEMPLATES = {
-    "mca_considered": {
-        "name": "MCA considered",
+    "placement_announcement": {
+        "name": "Placement announcement",
         "subject": "Placement opportunity: {company_name}",
-        "body": "Dear students,\n\n{company_name} is considering MCA students for {role}.\n\nPlease review the opportunity details and complete the consent form below if you wish to participate.",
-    },
-    "mca_not_considered": {
-        "name": "MCA not considered",
-        "subject": "Placement update: {company_name}",
-        "body": "Dear students,\n\n{company_name} is not considering MCA students for this opportunity. This announcement is being shared for your information.",
+        "body": "Hello everyone,\n\n{company_name} is recruiting students. The details are as follows:\n\nInterested students are required to fill the consent form by the stated deadline.",
     },
 }
 
@@ -65,16 +60,45 @@ async def _ensure_config(session):
     if settings is None:
         settings = PlacementAnnouncementSettings(id=1, templates=DEFAULT_TEMPLATES.copy())
         session.add(settings)
-    elif not settings.templates:
-        settings.templates = DEFAULT_TEMPLATES.copy()
+    else:
+        existing_template = settings.templates.get("placement_announcement") if settings.templates else None
+        settings.templates = {"placement_announcement": existing_template or DEFAULT_TEMPLATES["placement_announcement"]}
     lists = {}
-    for key, name in (("mca_considered", "MCA Considered / Eligible"), ("mca_not_considered", "MCA Not Considered / Not Eligible")):
+    for key, name in (("all_students", "All Students"),):
         recipient_list = await session.scalar(select(PlacementRecipientList).where(PlacementRecipientList.list_key == key))
         if recipient_list is None:
             recipient_list = PlacementRecipientList(name=name, list_key=key, active=True)
             session.add(recipient_list)
             await session.flush()
         lists[key] = recipient_list
+    legacy_lists = (await session.scalars(select(PlacementRecipientList).where(
+        PlacementRecipientList.list_key.in_(["mca_considered", "mca_not_considered"]),
+    ))).all()
+    for legacy_list in legacy_lists:
+        all_students = lists["all_students"]
+        existing = {item.email for item in (await session.scalars(select(PlacementRecipient).where(
+            PlacementRecipient.recipient_list_id == all_students.id,
+        ))).all()}
+        old_recipients = (await session.scalars(select(PlacementRecipient).where(
+            PlacementRecipient.recipient_list_id == legacy_list.id,
+            PlacementRecipient.active.is_(True),
+        ))).all()
+        for item in old_recipients:
+            if item.email not in existing:
+                session.add(PlacementRecipient(recipient_list_id=all_students.id, email=item.email, name=item.name, active=True))
+                existing.add(item.email)
+        legacy_list.active = False
+    recipients_without_list = (await session.scalars(select(PlacementRecipient).where(
+        PlacementRecipient.active.is_(True),
+        ~PlacementRecipient.recipient_list_id.in_(select(PlacementRecipientList.id).where(PlacementRecipientList.list_key == "all_students")),
+    ))).all()
+    existing = {item.email for item in (await session.scalars(select(PlacementRecipient).where(
+        PlacementRecipient.recipient_list_id == lists["all_students"].id,
+    ))).all()}
+    for item in recipients_without_list:
+        if item.email not in existing:
+            session.add(PlacementRecipient(recipient_list_id=lists["all_students"].id, email=item.email, name=item.name, active=True))
+            existing.add(item.email)
     await session.commit()
     await session.refresh(settings)
     return settings, lists
@@ -105,9 +129,10 @@ def _campaign_response(campaign):
         "id": campaign.id,
         "company_id": campaign.company_id,
         "sender_email": campaign.sender_email,
-        "template_key": campaign.template_key,
+        "template_key": "placement_announcement",
         "subject": campaign.subject,
         "body": campaign.body,
+        "additional_details": campaign.additional_details,
         "signature_text": campaign.signature_text,
         "include_signature": campaign.include_signature,
         "to_emails": campaign.to_emails,
@@ -143,9 +168,9 @@ async def update_announcement_config(payload: AnnouncementSettingsUpdate, sessio
     _require_spc(user)
     settings, lists = await _ensure_config(session)
     templates = payload.templates
-    for key in DEFAULT_TEMPLATES:
-        if key not in templates or not templates[key].get("subject", "").strip() or not templates[key].get("body", "").strip():
-            raise HTTPException(status_code=422, detail=f"Template {key} needs both a subject and body")
+    templates = {"placement_announcement": templates.get("placement_announcement") or DEFAULT_TEMPLATES["placement_announcement"]}
+    if not templates["placement_announcement"].get("subject", "").strip() or not templates["placement_announcement"].get("body", "").strip():
+        raise HTTPException(status_code=422, detail="The placement announcement needs both a subject and body")
     settings.placement_director_email = str(payload.placement_director_email) if payload.placement_director_email else None
     settings.co_spc_emails = list(dict.fromkeys(str(email).casefold() for email in payload.co_spc_emails))
     settings.staff_coordinator_email = str(payload.staff_coordinator_email) if payload.staff_coordinator_email else None
@@ -365,9 +390,10 @@ async def create_campaign_draft(payload: CampaignDraftInput, session: SessionDep
         recipient_list_id=recipient_list.id,
         initiated_by=user.id,
         sender_email=sender_account.email_address,
-        template_key=payload.template_key,
+        template_key="placement_announcement",
         subject=payload.subject.strip(),
         body=campaign_body,
+        additional_details=payload.additional_details,
         signature_text=sender_account.signature_text,
         include_signature=payload.include_signature,
         to_emails=to_emails,
@@ -488,6 +514,7 @@ async def send_campaign(campaign_id: int, payload: CampaignSendRequest, session:
                 include_signature=campaign.include_signature,
                 consent_form_url=campaign.consent_form_url,
                 links=campaign.links,
+                additional_details=campaign.additional_details or {},
                 attachments=attachments,
             )
             message_ids.append(await send_gmail_message(token, raw))

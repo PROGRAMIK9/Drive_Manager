@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from pydantic import EmailStr, HttpUrl
 from sqlmodel import SQLModel, Field
 from pydantic import field_validator
@@ -121,6 +121,8 @@ class PendingOpportunityRead(SQLModel):
     source_subject: str | None = None
     source_sender: str | None = None
     source_link: str | None = None
+    source_body: str | None = None
+    extracted_details: dict[str, Any] = Field(default_factory=dict)
     source_attachments: list[EmailAttachmentRead] = Field(default_factory=list)
     review_status: str
     rejection_reason: str | None = None
@@ -207,10 +209,11 @@ class CampaignAttachmentInput(SQLModel):
 class CampaignDraftInput(SQLModel):
     company_id: int
     recipient_list_id: int
-    template_key: Literal["mca_considered", "mca_not_considered"]
+    template_key: Literal["placement_announcement"] = "placement_announcement"
     consent_form_url: HttpUrl
     subject: str
     body: str
+    additional_details: dict[str, Any] = Field(default_factory=dict)
     include_signature: bool = True
     to_emails: list[EmailStr] | None = None
     cc_emails: list[EmailStr] | None = None

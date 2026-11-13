@@ -138,6 +138,7 @@ class PlacementCampaign(SQLModel, table=True):
     template_key: str = Field(max_length=40)
     subject: str
     body: str
+    additional_details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(sa.JSON, nullable=False))
     signature_text: str = Field(default="", sa_column=Column(sa.Text(), nullable=False, server_default=""))
     include_signature: bool = Field(default=True, sa_column=Column(sa.Boolean(), nullable=False, server_default=sa.true()))
     to_emails: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
