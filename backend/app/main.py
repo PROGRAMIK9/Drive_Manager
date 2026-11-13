@@ -23,25 +23,28 @@ async def lifespan(app:FastAPI):
         except asyncio.CancelledError:
             pass
 
-app = FastAPI(lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
+api = FastAPI(lifespan=lifespan)
+
+@api.get("/")
+async def get_root():
+    return {"Detail": "It works"}
+
+@api.get("/api/health", dependencies=[Depends(due_reminders_dependency)])
+async def health_check():
+    return {"detail": "Health Check Successful"}
+
+api.include_router(User)
+api.include_router(Company)
+api.include_router(PlacementReview)
+api.include_router(GmailIntegration)
+
+# Wrap the complete FastAPI app so CORS headers are also added to unhandled
+# server-error responses. This lets the browser surface the actual API error.
+app = CORSMiddleware(
+    app=api,
     allow_origins=app_settings.cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.get("/")
-async def get_root():
-    return {"Detail":"It works"}
-
-@app.get("/api/health", dependencies=[Depends(due_reminders_dependency)])
-async def health_check():
-    return {"detail": "Health Check Successful"}
-
-app.include_router(User)
-app.include_router(Company)
-app.include_router(PlacementReview)
-app.include_router(GmailIntegration)
 
