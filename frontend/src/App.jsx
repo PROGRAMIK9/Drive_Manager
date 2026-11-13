@@ -19,7 +19,7 @@ async function request(path, options = {}) {
     let error = {}
     try { error = responseBody ? JSON.parse(responseBody) : {} } catch { error = {} }
     const detail = Array.isArray(error.detail)
-      ? error.detail.map((item) => item.msg || JSON.stringify(item)).join(', ')
+      ? error.detail.map((item) => `${Array.isArray(item.loc) ? item.loc.filter((part) => part !== 'body').join('.') : ''}${Array.isArray(item.loc) && item.loc.length ? ': ' : ''}${item.msg || JSON.stringify(item)}`).join(', ')
       : typeof error.detail === 'string'
         ? error.detail
         : error.detail?.msg || responseBody.slice(0, 300) || `Request failed (${response.status})`
@@ -466,6 +466,7 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
   const [placementSource, setPlacementSource] = useState(null)
   const [formDeadlineTime, setFormDeadlineTime] = useState('20:00')
   const [draft, setDraft] = useState(null)
+  const [campaignPayload, setCampaignPayload] = useState(null)
   const [sourceBody, setSourceBody] = useState('')
   const [additionalData, setAdditionalData] = useState({})
   const [selectedAdditionalKeys, setSelectedAdditionalKeys] = useState([])
@@ -603,22 +604,28 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
       const missingLinkLines = parsedLinks.filter((link) => !body.includes(link.url)).map((link) => `${link.label}: ${link.url}`)
       const originalEmailSection = includeOriginalBody && sourceBody.trim() ? `Original placement email:\n${sourceBody.trim()}` : ''
       const campaignBody = [body.trim(), consentDeadline, ...missingLinkLines, originalEmailSection].filter(Boolean).join('\n\n')
-      const created = await request('/api/admin/placement/announcements/campaigns', { method: 'POST', headers, body: JSON.stringify({
+      const payload = {
         company_id: selectedCompany.id, recipient_list_id: selectedList.id, template_key: templateKey, consent_form_url: consentUrl,
         subject, body: campaignBody, include_signature: true, to_emails: toText.trim() ? splitEmails(toText) : undefined, cc_emails: ccText.trim() ? splitEmails(ccText) : undefined,
         links: parsedLinks, attachments: files, additional_details: details, request_key: crypto.randomUUID(),
-      }) })
-      setDraft(created)
-      setCampaigns((current) => [created, ...current.filter((item) => item.id !== created.id)])
-      onStatus('Draft saved. Review the recipients and message preview before sending.')
+      }
+      const toEmails = payload.to_emails || (config?.placement_director_email ? [config.placement_director_email] : [])
+      const ccEmails = payload.cc_emails || [...(config?.co_spc_emails || []), config?.staff_coordinator_email].filter(Boolean)
+      const visible = new Set([...toEmails, ...ccEmails].map((email) => email.toLocaleLowerCase()))
+      const bccCount = recipients.filter((item) => item.active && !visible.has(item.email.toLocaleLowerCase())).length
+      setCampaignPayload(payload)
+      setDraft({ status: 'PREVIEW', request_key: payload.request_key, sender_email: sender.email_address, to_emails: toEmails, cc_emails: ccEmails, bcc_count: bccCount, subject, body: campaignBody, include_signature: true, signature_text: signature, attachment_names: files.map((file) => file.filename) })
+      onStatus('Preview ready. Nothing has been saved or sent yet.')
     } catch (e) { onError(e.message) } finally { setBusy(false) }
   }
   async function sendDraft() {
-    if (!draft) return
+    if (!draft || !campaignPayload) return
     if (!window.confirm(`Send this announcement to ${draft.bcc_count} students using ${draft.sender_email}?`)) return
     setBusy(true)
     try {
-      const sent = await request(`/api/admin/placement/announcements/campaigns/${draft.id}/send`, { method: 'POST', headers, body: JSON.stringify({ request_key: draft.request_key }) })
+      const created = await request('/api/admin/placement/announcements/campaigns', { method: 'POST', headers, body: JSON.stringify(campaignPayload) })
+      setDraft(created)
+      const sent = await request(`/api/admin/placement/announcements/campaigns/${created.id}/send`, { method: 'POST', headers, body: JSON.stringify({ request_key: created.request_key || campaignPayload.request_key }) })
       setDraft(sent); setCampaigns((current) => [sent, ...current.filter((item) => item.id !== sent.id)])
       onStatus(`Announcement sending finished: ${sent.status}.`)
     } catch (e) { onError(e.message) } finally { setBusy(false) }
@@ -656,9 +663,9 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
       </div>
       <article className="interest-panel announcement-form campaign-form"><h3>Compose announcement</h3><p>The message is prefilled with the placement email details, links, and attached documents. Review and edit it before sending.</p><div className="form-columns"><label>Published opportunity<select value={companyId} onChange={(e) => setCompanyId(e.target.value)}><option value="">Choose company</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name} · {company.process.replaceAll('_', ' ')}</option>)}</select></label><label>Distribution list<select value={listKey} onChange={(e) => setListKey(e.target.value)}>{lists.map((item) => <option key={item.id} value={item.list_key}>{item.name} · {item.active_count} active</option>)}</select></label><label>Consent Google Form URL<input value={consentUrl} onChange={(e) => setConsentUrl(e.target.value)} placeholder="https://docs.google.com/forms/..." /></label><label>Form deadline time (today)<input type="time" value={formDeadlineTime} onChange={(e) => setFormDeadlineTime(e.target.value)} /><small>Students will be asked to submit by {formatDeadline(formDeadlineTime)}.</small></label><label>To<input value={toText || config?.placement_director_email || ''} onChange={(e) => setToText(e.target.value)} /></label><label>CC<input value={ccText || [...(config?.co_spc_emails || []), config?.staff_coordinator_email].filter(Boolean).join(', ')} onChange={(e) => setCcText(e.target.value)} /></label><label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label></div>
       {Object.keys(additionalData).length > 0 && <fieldset className="additional-fact-selector"><legend>Additional facts from the email</legend><p>Select which extra details to include. Standard fields above are already included when present.</p>{Object.entries(additionalData).map(([key, value]) => <label className="additional-fact-option" key={key}><input type="checkbox" checked={selectedAdditionalKeys.includes(key)} onChange={(event) => setSelectedAdditionalKeys((current) => event.target.checked ? [...current, key] : current.filter((item) => item !== key))} /><span><strong>{key}</strong><small>{factText(value)}</small></span></label>)}</fieldset>}
-      <label>Message<textarea rows={14} value={body} onChange={(e) => setBody(e.target.value)} /></label>{sourceBody && <><label className="source-email-toggle"><input type="checkbox" checked={includeOriginalBody} onChange={(e) => setIncludeOriginalBody(e.target.checked)} /> Include the original placement email below the formatted details</label><details className="source-email-body"><summary>View original placement email</summary><pre>{sourceBody}</pre></details></>}<label>Links <small>One per line: Label | https://…</small><textarea rows={3} value={extraLinks} onChange={(e) => setExtraLinks(e.target.value)} placeholder="Job description | https://…" /></label><label>Add documents (PDF, DOC, DOCX, XLSX; up to 8 MB each)<input type="file" accept=".pdf,.doc,.docx,.xlsx" multiple onChange={uploadFiles} /></label>{files.map((file, index) => <div className="file-chip" key={`${file.filename}-${index}`}><span>{file.filename}{file.kind === 'inbox' ? ' · from placement email' : ''}</span><button onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}>Remove</button></div>)}<div className="review-actions"><button className="primary-button" disabled={busy} onClick={createDraft}>Save draft and preview</button>{draft && <button className="primary-button" disabled={busy || draft.status !== 'DRAFT'} onClick={sendDraft}>Send announcement</button>}</div>
+      <label>Message<textarea rows={14} value={body} onChange={(e) => setBody(e.target.value)} /></label>{sourceBody && <><label className="source-email-toggle"><input type="checkbox" checked={includeOriginalBody} onChange={(e) => setIncludeOriginalBody(e.target.checked)} /> Include the original placement email below the formatted details</label><details className="source-email-body"><summary>View original placement email</summary><pre>{sourceBody}</pre></details></>}<label>Links <small>One per line: Label | https://…</small><textarea rows={3} value={extraLinks} onChange={(e) => setExtraLinks(e.target.value)} placeholder="Job description | https://…" /></label><label>Add documents (PDF, DOC, DOCX, XLSX; up to 8 MB each)<input type="file" accept=".pdf,.doc,.docx,.xlsx" multiple onChange={uploadFiles} /></label>{files.map((file, index) => <div className="file-chip" key={`${file.filename}-${index}`}><span>{file.filename}{file.kind === 'inbox' ? ' · from placement email' : ''}</span><button onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}>Remove</button></div>)}<div className="review-actions"><button className="primary-button" disabled={busy} onClick={createDraft}>Preview announcement</button>{draft && <button className="primary-button" disabled={busy || ['SENT', 'PARTIALLY_SENT', 'SENDING'].includes(draft.status)} onClick={sendDraft}>Send announcement</button>}</div>
       {draft && <div className="campaign-preview"><span className="section-kicker">Preview · {draft.status}</span><h3>{draft.subject}</h3><p>From: {draft.sender_email} · To: {draft.to_emails.join(', ')} · CC: {draft.cc_emails.join(', ') || 'None'} · BCC: {draft.bcc_count} students</p><pre>{draft.body}{draft.include_signature && draft.signature_text ? `\n\n${draft.signature_text}` : ''}</pre><p>Attachments: {draft.attachment_names.join(', ') || 'None'}</p></div>}</article>
-      <section className="interest-list"><h3>Campaign history</h3>{campaigns.map((campaign) => <article className="interest-panel campaign-row" key={campaign.id}><div><strong>{campaign.subject}</strong><span>{campaign.status} · {campaign.sender_email} · {campaign.bcc_count} BCC recipients</span><small>{new Date(campaign.created_at).toLocaleString()}</small>{campaign.error_details && <small className="review-warning">{campaign.error_details}</small>}</div></article>)}</section>
+      <section className="interest-list"><h3>Campaign history</h3>{campaigns.filter((campaign) => campaign.status !== 'DRAFT').map((campaign) => <article className="interest-panel campaign-row" key={campaign.id}><div><strong>{campaign.subject}</strong><span>{campaign.status} · {campaign.sender_email} · {campaign.bcc_count} BCC recipients</span><small>{new Date(campaign.created_at).toLocaleString()}</small>{campaign.error_details && <small className="review-warning">{campaign.error_details}</small>}</div></article>)}</section>
     </>}
   </>
 }

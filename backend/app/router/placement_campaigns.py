@@ -148,6 +148,7 @@ def _campaign_response(campaign):
         "attachments": campaign.attachments,
         "attachment_names": campaign.attachment_names,
         "gmail_message_ids": campaign.gmail_message_ids,
+        "request_key": campaign.request_key,
         "status": campaign.status,
         "error_details": campaign.error_details,
         "created_at": campaign.created_at,
