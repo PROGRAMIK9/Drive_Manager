@@ -28,6 +28,8 @@ services:
         sync: false
       - key: GOOGLE_REDIRECT_URI
         sync: false
+      - key: FRONTEND_URL
+        value: https://driveboard-rvce.onrender.com
       - key: GOOGLE_PUBSUB_TOPIC
         sync: false
       - key: GOOGLE_PUBSUB_SUBSCRIPTION
@@ -53,7 +55,7 @@ services:
       - key: SPC_EMAILS
         sync: false
       - key: CORS_ORIGINS
-        sync: false
+        value: https://driveboard-rvce.onrender.com
       - key: MAIL_USERNAME
         sync: false
       - key: BREVO_API_KEY
