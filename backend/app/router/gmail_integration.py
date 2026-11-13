@@ -236,12 +236,15 @@ async def gmail_pubsub_webhook(
     session: SessionDep,
     authorization: Annotated[str | None, Header()] = None,
 ):
-    bearer = (authorization or "").removeprefix("Bearer ").strip()
-    if not bearer:
+    scheme, separator, bearer = (authorization or "").strip().partition(" ")
+    bearer = bearer.strip()
+    if not separator or scheme.casefold() != "bearer" or not bearer:
+        logger.warning("Gmail Pub/Sub webhook rejected request without a bearer token")
         raise HTTPException(status_code=401, detail="Pub/Sub authentication is required")
     try:
         verify_pubsub_bearer(bearer)
     except GmailCredentialError as exc:
+        logger.warning("Gmail Pub/Sub webhook rejected OIDC authentication: %s", exc)
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     message = payload.get("message")
     if not isinstance(message, dict) or not isinstance(message.get("data"), str) or not message.get("messageId"):

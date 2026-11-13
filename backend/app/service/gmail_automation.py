@@ -9,9 +9,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config.config import gmail_settings
+from app.config.config import app_settings
 from app.database.database import engine
-from app.schema.database import GmailIntegration, GmailNotification, PendingPlacementOpportunity, ProcessedEmail
+from app.schema.database import GmailIntegration, GmailNotification, PendingPlacementOpportunity, ProcessedEmail, Role, User
 from app.service.eligibility import assess_mca_eligibility
+from app.service.email_sender import send_template_email
 from app.service.gmail_sync import (
     fetch_message,
     get_access_token,
@@ -98,7 +100,8 @@ async def _extract_and_queue(session, email_row: ProcessedEmail) -> str:
     existing = await session.scalar(
         select(PendingPlacementOpportunity).where(PendingPlacementOpportunity.source_email_id == email_row.id)
     )
-    if existing is None:
+    created_pending = existing is None
+    if created_pending:
         eligibility = assess_mca_eligibility(
             result.get("eligible_courses"),
             excluded_courses=result.get("excluded_courses"),
@@ -139,6 +142,25 @@ async def _extract_and_queue(session, email_row: ProcessedEmail) -> str:
         ))
     email_row.processing_status = "PROCESSED"
     await session.commit()
+    if created_pending:
+        coordinators = (await session.scalars(select(User).where(User.role == Role.spc))).all()
+        review_url = f"{app_settings.FRONTEND_URL.rstrip('/')}/"
+        for coordinator in coordinators:
+            try:
+                await send_template_email(
+                    recipient=coordinator.email,
+                    subject=f"Placement email needs SPC review: {company_name}",
+                    template_name="placement_review.html",
+                    context={
+                        "recipient_name": coordinator.name,
+                        "company_name": company_name,
+                        "email_subject": email_row.subject or "(no subject)",
+                        "email_sender": email_row.sender or "Unknown sender",
+                        "review_url": review_url,
+                    },
+                )
+            except Exception:
+                logger.exception("Unable to notify SPC %s about pending opportunity %s", coordinator.id, company_name)
     return "placement"
 
 
