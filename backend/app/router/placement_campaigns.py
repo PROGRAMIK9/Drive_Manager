@@ -192,6 +192,30 @@ async def get_recipients(list_id: int, session: SessionDep, user: CurrentUserDep
     return [{"id": item.id, "email": item.email, "name": item.name, "active": item.active} for item in recipients]
 
 
+@router.delete("/lists/{list_id}/recipients")
+async def clear_recipients(list_id: int, session: SessionDep, user: CurrentUserDep):
+    _require_spc(user)
+    recipient_list = await session.get(PlacementRecipientList, list_id)
+    if recipient_list is None:
+        raise HTTPException(status_code=404, detail="Recipient list not found")
+    result = await session.execute(
+        PlacementRecipient.__table__.delete().where(PlacementRecipient.recipient_list_id == list_id)
+    )
+    await session.commit()
+    return {"deleted": result.rowcount or 0}
+
+
+@router.delete("/recipients/{recipient_id}")
+async def delete_recipient(recipient_id: int, session: SessionDep, user: CurrentUserDep):
+    _require_spc(user)
+    recipient = await session.get(PlacementRecipient, recipient_id)
+    if recipient is None:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    await session.delete(recipient)
+    await session.commit()
+    return {"id": recipient_id, "deleted": True}
+
+
 @router.post("/lists/{list_id}/import")
 async def import_recipients(list_id: int, payload: RecipientImport, session: SessionDep, user: CurrentUserDep):
     _require_spc(user)

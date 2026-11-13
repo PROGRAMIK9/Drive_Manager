@@ -456,6 +456,38 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
       onStatus(`Recipient list updated: ${result.added} added, ${result.reactivated} reactivated, ${result.duplicates_removed} duplicates skipped.`)
     } catch (e) { onError(e.message) } finally { setBusy(false) }
   }
+  async function refreshRecipients() {
+    if (!selectedList) return
+    const updated = await request(`/api/admin/placement/announcements/lists/${selectedList.id}/recipients`, { headers })
+    setRecipients(updated)
+    const nextConfig = await request('/api/admin/placement/announcements/config', { headers })
+    setConfig(nextConfig)
+  }
+  async function removeRecipient(recipient) {
+    setBusy(true)
+    try {
+      await request(`/api/admin/placement/announcements/recipients/${recipient.id}`, { method: 'DELETE', headers })
+      await refreshRecipients()
+      onStatus(`${recipient.email} removed from the student list.`)
+    } catch (e) { onError(e.message) } finally { setBusy(false) }
+  }
+  async function clearRecipientList() {
+    if (!selectedList || !window.confirm(`Permanently remove every address from ${selectedList.name}? This does not change sent campaign history.`)) return
+    setBusy(true)
+    try {
+      const result = await request(`/api/admin/placement/announcements/lists/${selectedList.id}/recipients`, { method: 'DELETE', headers })
+      await refreshRecipients()
+      onStatus(`Cleared ${result.deleted} addresses from ${selectedList.name}.`)
+    } catch (e) { onError(e.message) } finally { setBusy(false) }
+  }
+  async function setRecipientActive(recipient, active) {
+    setBusy(true)
+    try {
+      await request(`/api/admin/placement/announcements/recipients/${recipient.id}?active=${active}`, { method: 'PATCH', headers })
+      await refreshRecipients()
+      onStatus(`${recipient.email} ${active ? 'restored to' : 'removed from'} the active student list.`)
+    } catch (e) { onError(e.message) } finally { setBusy(false) }
+  }
   async function saveSignature() {
     try {
       await request('/api/integrations/gmail/sender/signature', { method: 'PUT', headers, body: JSON.stringify({ signature_text: signature }) })
@@ -506,8 +538,30 @@ function AnnouncementWorkspace({ token, config, setConfig, sender, onConnectSend
     {sender.connected && <>
       <article className="interest-panel announcement-panel"><div className="announcement-form"><h3>Automatic signature</h3><p>Gmail API sends do not append the signature from Gmail’s web compose settings. Add the text here; it appears in the preview and message.</p><textarea value={signature} onChange={(e) => setSignature(e.target.value)} placeholder={'Regards,\nYour name\nStudent Placement Coordinator'} rows={4} /></div><button className="secondary-button" onClick={saveSignature}>Save signature</button></article>
       <div className="announcement-grid">
-        <article className="interest-panel announcement-form"><h3>Recipients and announcement</h3><label>Placement director email<input value={config?.placement_director_email || ''} onChange={(e) => setConfig({ ...config, placement_director_email: e.target.value })} placeholder="director-mca@rvce.edu.in" /></label><label>CC emails<input value={(config?.co_spc_emails || []).join(', ')} onChange={(e) => setConfig({ ...config, co_spc_emails: splitEmails(e.target.value) })} placeholder="Co-SPC addresses, comma separated" /></label><label>Staff coordinator email<input value={config?.staff_coordinator_email || ''} onChange={(e) => setConfig({ ...config, staff_coordinator_email: e.target.value })} placeholder="Coordinator address" /></label><label>Subject<input value={currentTemplate.subject || ''} onChange={(e) => setConfig({ ...config, templates: { ...templates, [templateKey]: { ...currentTemplate, subject: e.target.value } } })} /></label><label>Message guidance<textarea rows={5} value={currentTemplate.body || ''} onChange={(e) => setConfig({ ...config, templates: { ...templates, [templateKey]: { ...currentTemplate, body: e.target.value } } })} /></label><button className="secondary-button" disabled={busy} onClick={saveConfig}>Save recipients and templates</button></article>
-        <article className="interest-panel announcement-form"><h3>Student list</h3><label>List<select value={listKey} onChange={(e) => setListKey(e.target.value)}>{lists.map((item) => <option key={item.id} value={item.list_key}>{item.name} · {item.active_count} active</option>)}</select></label><p>Paste or upload a CSV or copied email table. Addresses stay in this database and can be edited by importing an updated list later.</p><textarea rows={7} value={recipientText} onChange={(e) => setRecipientText(e.target.value)} placeholder="Paste student email addresses here" /><button className="secondary-button" disabled={busy || !recipientText.trim()} onClick={importRecipients}>Import addresses</button><div className="recipient-preview">{recipients.filter((item) => item.active).length} active addresses</div></article>
+        <details className="interest-panel announcement-disclosure">
+          <summary><span><strong>Recipients and announcement</strong><small>Placement director, CC list, and default message</small></span></summary>
+          <div className="announcement-form">
+            <label>Placement director email<input value={config?.placement_director_email || ''} onChange={(e) => setConfig({ ...config, placement_director_email: e.target.value })} placeholder="director-mca@rvce.edu.in" /></label>
+            <label>CC emails<input value={(config?.co_spc_emails || []).join(', ')} onChange={(e) => setConfig({ ...config, co_spc_emails: splitEmails(e.target.value) })} placeholder="Co-SPC addresses, comma separated" /></label>
+            <label>Staff coordinator email<input value={config?.staff_coordinator_email || ''} onChange={(e) => setConfig({ ...config, staff_coordinator_email: e.target.value })} placeholder="Coordinator address" /></label>
+            <label>Subject<input value={currentTemplate.subject || ''} onChange={(e) => setConfig({ ...config, templates: { ...templates, [templateKey]: { ...currentTemplate, subject: e.target.value } } })} /></label>
+            <label>Message guidance<textarea rows={5} value={currentTemplate.body || ''} onChange={(e) => setConfig({ ...config, templates: { ...templates, [templateKey]: { ...currentTemplate, body: e.target.value } } })} /></label>
+            <button className="secondary-button" disabled={busy} onClick={saveConfig}>Save recipients and templates</button>
+          </div>
+        </details>
+        <details className="interest-panel announcement-disclosure">
+          <summary><span><strong>Student list</strong><small>{selectedList?.active_count || 0} active addresses · choose to import, remove, or clear</small></span></summary>
+          <div className="announcement-form">
+            <label>List<select value={listKey} onChange={(e) => setListKey(e.target.value)}>{lists.map((item) => <option key={item.id} value={item.list_key}>{item.name} · {item.active_count} active</option>)}</select></label>
+            <p>Import addresses to add or restore students. Removing a student takes them out of future sends.</p>
+            <textarea rows={5} value={recipientText} onChange={(e) => setRecipientText(e.target.value)} placeholder="Paste student email addresses here" />
+            <div className="recipient-management-actions"><button className="secondary-button" disabled={busy || !recipientText.trim()} onClick={importRecipients}>Import addresses</button><button className="danger-button" disabled={busy || recipients.length === 0} onClick={clearRecipientList}>Clear list</button></div>
+            <div className="recipient-preview">{recipients.filter((item) => item.active).length} active addresses</div>
+            <div className="recipient-list" aria-label="Students in the selected list">
+              {recipients.length === 0 ? <p>No addresses in this list yet.</p> : recipients.map((recipient) => <div className={`recipient-row${recipient.active ? '' : ' is-inactive'}`} key={recipient.id}><span>{recipient.name || recipient.email}<small>{recipient.name ? recipient.email : ''}{!recipient.active ? ' · removed' : ''}</small></span>{recipient.active ? <button className="recipient-remove" disabled={busy} onClick={() => removeRecipient(recipient)} aria-label={`Delete ${recipient.email}`}><Trash2 size={15} /> Remove</button> : <button className="recipient-restore" disabled={busy} onClick={() => setRecipientActive(recipient, true)}>Restore</button>}</div>)}
+            </div>
+          </div>
+        </details>
       </div>
       <article className="interest-panel announcement-form campaign-form"><h3>Compose announcement</h3><p>Start with the placement email facts, then edit the complete message. Extra details are saved with the campaign even when they do not fit a standard field.</p><div className="form-columns"><label>Published opportunity<select value={companyId} onChange={(e) => setCompanyId(e.target.value)}><option value="">Choose company</option>{companies.map((company) => <option key={company.id} value={company.id}>{company.name} · {company.process.replaceAll('_', ' ')}</option>)}</select></label><label>Distribution list<select value={listKey} onChange={(e) => setListKey(e.target.value)}>{lists.map((item) => <option key={item.id} value={item.list_key}>{item.name} · {item.active_count} active</option>)}</select></label><label>Consent Google Form URL<input value={consentUrl} onChange={(e) => setConsentUrl(e.target.value)} placeholder="https://docs.google.com/forms/..." /></label><label>To<input value={toText || config?.placement_director_email || ''} onChange={(e) => setToText(e.target.value)} /></label><label>CC<input value={ccText || [...(config?.co_spc_emails || []), config?.staff_coordinator_email].filter(Boolean).join(', ')} onChange={(e) => setCcText(e.target.value)} /></label><label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label></div><label>Message<textarea rows={7} value={body} onChange={(e) => setBody(e.target.value)} /></label><label>Additional details (JSON)<small>Examples: vacancies, exact address, rounds, PBC/FTE conditions, work location details.</small><textarea rows={6} value={additionalDetails} onChange={(e) => setAdditionalDetails(e.target.value)} /></label>{sourceBody && <><label className="source-email-toggle"><input type="checkbox" checked={includeOriginalBody} onChange={(e) => setIncludeOriginalBody(e.target.checked)} /> Include original placement email in saved campaign details</label><details className="source-email-body"><summary>View original placement email</summary><pre>{sourceBody}</pre></details></>}<label>Additional links <small>One per line: Label | https://…</small><textarea rows={3} value={extraLinks} onChange={(e) => setExtraLinks(e.target.value)} placeholder="Job description | https://…" /></label><label>Attachments (PDF, DOC, DOCX, XLSX; up to 8 MB each)<input type="file" accept=".pdf,.doc,.docx,.xlsx" multiple onChange={uploadFiles} /></label>{files.map((file, index) => <div className="file-chip" key={`${file.filename}-${index}`}>{file.filename}<button onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}>Remove</button></div>)}<div className="review-actions"><button className="primary-button" disabled={busy} onClick={createDraft}>Save draft and preview</button>{draft && <button className="primary-button" disabled={busy || draft.status !== 'DRAFT'} onClick={sendDraft}>Send announcement</button>}</div>
       {draft && <div className="campaign-preview"><span className="section-kicker">Preview · {draft.status}</span><h3>{draft.subject}</h3><p>From: {draft.sender_email} · To: {draft.to_emails.join(', ')} · CC: {draft.cc_emails.join(', ') || 'None'} · BCC: {draft.bcc_count} students</p><pre>{draft.body}{draft.include_signature && draft.signature_text ? `\n\n${draft.signature_text}` : ''}{Object.entries(draft.additional_details || {}).filter(([key]) => key !== 'original_email_body').map(([key, value]) => `\n\n${key.replaceAll('_', ' ')}: ${typeof value === 'string' ? value : JSON.stringify(value)}`).join('')}\n\nConsent form: {draft.consent_form_url}{(draft.links || []).map((link) => `\n${link.label}: ${link.url}`).join('')}</pre><p>Attachments: {draft.attachment_names.join(', ') || 'None'}</p></div>}</article>
