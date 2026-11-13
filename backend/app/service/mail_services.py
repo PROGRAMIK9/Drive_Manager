@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks
 from sqlalchemy import or_, select
@@ -81,7 +80,8 @@ def queue_spc_company_notification(background_tasks: BackgroundTasks, *, recipie
 async def queue_event_reminder(session: AsyncSession, company_id: int, company_date: datetime) -> None:
     """Persist a reminder so it remains available after process restarts or sleep."""
     if company_date.tzinfo is None:
-        company_date = company_date.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+        # `company.date` is stored as UTC in a timezone-naive legacy column.
+        company_date = company_date.replace(tzinfo=timezone.utc)
     event_at = company_date.astimezone(timezone.utc)
     now = datetime.now(timezone.utc)
     scheduled_at = event_at - timedelta(hours=1)

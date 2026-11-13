@@ -103,11 +103,13 @@ async def serialize_opportunity(
         **{
             key: getattr(item, key)
             for key in PendingOpportunityRead.model_fields
-            if key not in {"source_subject", "source_sender", "source_link", "source_attachments", "possible_duplicates"}
+            if key not in {"source_subject", "source_sender", "source_link", "source_body", "extracted_details", "source_attachments", "possible_duplicates"}
         },
         source_subject=source.subject if source else None,
         source_sender=source.sender if source else None,
         source_link=source.source_link if source else None,
+        source_body=str((source.extracted_data or {}).get("body", "")) if source else None,
+        extracted_details=(source.extracted_data or {}).get("placement_extraction", {}) if source else {},
         source_attachments=(source.extracted_data or {}).get("attachments", []) if source else [],
         possible_duplicates=duplicates,
     )
@@ -127,6 +129,11 @@ async def approve_opportunity(session: AsyncSession, item: PendingPlacementOppor
         process = Process.interview
     if event_date is None:
         event_date = item.application_deadline or datetime.now(timezone.utc)
+    # `company.date` is a legacy TIMESTAMP WITHOUT TIME ZONE column. Keep
+    # storing UTC wall time there while retaining aware timestamps in the
+    # email review tables and reminder scheduling.
+    if event_date.tzinfo is not None:
+        event_date = event_date.astimezone(timezone.utc).replace(tzinfo=None)
 
     company = Company(
         name=item.company_name,
@@ -135,7 +142,7 @@ async def approve_opportunity(session: AsyncSession, item: PendingPlacementOppor
         date=event_date,
         # The legacy company row supports one batch; use a sentinel so unknown or
         # multi-batch email opportunities are not silently treated as 2027-only.
-        year_of_passing=(item.eligible_batches[0] if len(item.eligible_batches) == 1 else 0),
+        year_of_passing=(item.eligible_batches[0] if len(item.eligible_batches) == 1 and item.eligible_batches[0] in (2027, 2028) else 0),
         considered=False,
     )
     session.add(company)
