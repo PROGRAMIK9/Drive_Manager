@@ -3,11 +3,11 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from fastapi import BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from app.database.database import SessionDep, get_async_session
 from app.schema.models import CompanyCreate, CompanyRead, CompanyUpdate
-from app.schema.database import Company, EventReminder, Interested, Process, Role, User
+from app.schema.database import Company, EventReminder, Interested, PendingPlacementOpportunity, PlacementCampaign, Process, Role, User
 from app.service.mail_services import queue_event_reminder
 from app.service.mail_services import queue_spc_company_notification
 from app.service.user_services import CurrentUserDep
@@ -157,11 +157,36 @@ class CompanyService:
         company = await self.session.get(Company, company_id)
         if not company:
             raise HTTPException(status_code=404, detail="Company does not exist yet")
+        campaign_rows = (await self.session.scalars(
+            select(PlacementCampaign).where(PlacementCampaign.company_id == company_id)
+        )).all()
+        if any(campaign.status != "DRAFT" for campaign in campaign_rows):
+            raise HTTPException(
+                status_code=409,
+                detail="This company has sent or attempted announcement history and cannot be deleted. Keep it for the campaign record.",
+            )
         await self.session.execute(
             delete(Interested).where(Interested.company_id == company_id)
         )
         await self.session.execute(
             delete(EventReminder).where(EventReminder.company_id == company_id)
+        )
+        await self.session.execute(
+            delete(PlacementCampaign).where(
+                PlacementCampaign.company_id == company_id,
+                PlacementCampaign.status == "DRAFT",
+            )
+        )
+        await self.session.execute(
+            update(PendingPlacementOpportunity)
+            .where(PendingPlacementOpportunity.published_company_id == company_id)
+            .values(
+                published_company_id=None,
+                review_status="REJECTED",
+                rejection_reason="Published company was deleted by an SPC",
+                reviewed_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
         )
         await self.session.delete(company)
         await self.session.commit()

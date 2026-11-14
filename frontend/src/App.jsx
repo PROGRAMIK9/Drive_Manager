@@ -272,7 +272,7 @@ function App() {
   }
 
   async function deleteCompany(company) {
-    if (!window.confirm(`Delete ${company.name}? This will also remove its saved interest and reminder.`)) return
+    if (!window.confirm(`Delete ${company.name}? This will remove its saved interests, reminders, and any unsent announcement drafts.`)) return
     try {
       await request(`/company/${company.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
       setCompanies((current) => current.filter((item) => item.id !== company.id))
